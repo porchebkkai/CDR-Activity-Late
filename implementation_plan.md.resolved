@@ -1,0 +1,37 @@
+# Remove Lateness Record Page
+
+Remove the "Lateness Record" page from navigation (HRT, OnDutyTeacher, OfficeStaff) and delete the unused [loadLatenessPage](file:///c:/Users/Umar/Desktop/CDR%20Activity-Late/index.html#3102-3182) function.
+
+## Proposed Changes
+
+### [MODIFY] [index.html](file:///c:/Users/Umar/Desktop/CDR%20Activity-Late/index.html)
+
+#### Navigation & Translations
+| Item | Line | Change |
+|------|------|--------|
+| Nav item | ~1499-1501 | **Delete** `items.push({ key: 'latenessRecord', icon: '⏰', page: 'lateness' });` |
+| Case handler | ~1553 | **Delete** `case 'lateness': loadLatenessPage(); break;` |
+| Thai translation | ~1173 | **Delete** `latenessRecord: 'บันทึกการมาสาย',` |
+| English translation | ~1198 | **Delete** `latenessRecord: 'Lateness Record',` |
+
+#### Functions to Delete (~80 lines)
+| Function | Lines | Reason |
+|----------|-------|--------|
+| [loadLatenessPage](file:///c:/Users/Umar/Desktop/CDR%20Activity-Late/index.html#3102-3182) | 3102-3181 | Main page loader - only called from nav |
+
+#### Functions to KEEP (Shared with Kiosk)
+| Function | Used By |
+|----------|---------|
+| [selectReasonChip](file:///c:/Users/Umar/Desktop/CDR%20Activity-Late/index.html#2141-2191) | Kiosk mode (lines 749-752, 2076-2088) |
+| [saveLatenessRecord](file:///c:/Users/Umar/Desktop/CDR%20Activity-Late/Code.js#1317-1399) (backend) | Kiosk mode submissions |
+
+---
+
+## Verification Plan
+
+### Manual Testing
+1. **Deploy the updated code** to Apps Script
+2. **Login as HRT** - verify "Lateness Record" / "บันทึกการมาสาย" is gone from navigation
+3. **Login as OnDutyTeacher** - verify same
+4. **Test Kiosk mode** - verify lateness logging still works (uses different flow)
+5. **Check for console errors** in browser developer tools
