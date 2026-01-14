@@ -1181,86 +1181,86 @@ function getMonthlyActivityLateCount(studentId) {
 }
 
 function saveLatenessRecord(record) {
-try {
-var ss = SpreadsheetApp.getActiveSpreadsheet();
-var latenessSheet = ss.getSheetByName('Lateness_Log');
-if (!latenessSheet) {
-return { success: false, message: 'Lateness_Log sheet not found' };
-}
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var latenessSheet = ss.getSheetByName('Lateness_Log');
+    if (!latenessSheet) {
+      return { success: false, message: 'Lateness_Log sheet not found' };
+    }
 
-// === ADD THIS DUPLICATE CHECK ===
-var dateStr = record.date || new Date().toISOString().split('T')[0];
-var studentId = String(record.studentId).trim();
+    // === ADD THIS DUPLICATE CHECK ===
+    var dateStr = record.date || new Date().toISOString().split('T')[0];
+    var studentId = String(record.studentId).trim();
 
-// Check for duplicate records
-if (hasExistingLatenessRecord(studentId, dateStr)) {
-  return { 
-    success: false, 
-    duplicate: true, 
-    message: 'นักเรียนคนนี้มีข้อมูลการมาสายในวันนี้อยู่แล้ว' 
-  };
-}
-// === END DUPLICATE CHECK ===
+    // Check for duplicate records
+    if (hasExistingLatenessRecord(studentId, dateStr)) {
+      return {
+        success: false,
+        duplicate: true,
+        message: 'นักเรียนคนนี้มีข้อมูลการมาสายในวันนี้อยู่แล้ว'
+      };
+    }
+    // === END DUPLICATE CHECK ===
 
-var id = 'LATE' + new Date().getTime();
-// Fix: Interpret record.date (YYYY-MM-DD) as LOCAL time
-var recordDate;
-if (record.date) {
-var parts = record.date.split('-');
-recordDate = new Date(parts[0], parts[1] - 1, parts[2]);
-} else {
-var now = new Date();
-recordDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-// Logic separation: Real Late vs Activity Late
-var isRealLate = (record.recordType === 'Real Late' || record.recordType === '8:00');
-var isActivityLate = (record.recordType === 'Activity Late' || record.recordType === '7:40');
-// --- CALCULATE STRIKE COUNT (Activity Late Only) ---
-var strikeCount = 0;
-if (isActivityLate && record.studentId) {
-// Get existing count for this month + 1
-strikeCount = getMonthlyActivityLateCount(record.studentId) + 1;
-} else if (isRealLate) {
-strikeCount = 1; // Real late doesn't use the monthly 1-2-3 ladder in the same way
-}
-// 1. Save to Lateness_Log Sheet
-latenessSheet.appendRow([
-id,                                         // ID
-Utilities.formatDate(recordDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-record.time || '',                          // Time
-record.studentId || '',                     // StudentID
-record.studentName || '',                   // StudentName
-record.class || '',                         // Class
-record.reason || '',                        // Reason
-record.recordedBy || '',                    // RecordedBy
-record.recordType || '',                    // RecordType
-record.status || 'Pending',                 // Status
-strikeCount,                                // StrikeCount
-'', '', '', '', '', '', ''                  // Placeholders for review columns
-]);
-// 2. Integration: Bonus Update
-if (record.studentId) {
-try { updateBonusEligibility(record.studentId, recordDate); } catch (e) { console.error(e); }
-}
-// 3. --- STRICT THAI MESSAGING RULES ---
-var actionMessage = '';
-if (isActivityLate) {
-if (strikeCount === 1) {
-actionMessage = 'Strike 1: นักเรียนได้รับการตักเตือนและแจ้งผู้ปกครอง';
-} else if (strikeCount === 2) {
-actionMessage = 'Strike 2: งดเบรค (Lunch Detention) + แจ้งเตือนผู้ปกครองเรื่องนัดพบ';
-} else if (strikeCount >= 3) {
-actionMessage = 'Strike 3: เชิญผู้ปกครอง + นัดหมาย (3 ครั้ง/เดือน)';
-}
-} else if (isRealLate) {
-// Optional: Add specific message for Real Late if needed
-actionMessage = 'Real Late: หัก 10 คะแนน + วิ่ง (ตามกฎ)';
-}
-return { success: true, message: 'บันทึกสำเร็จ', id: id, action: actionMessage };
-} catch (error) {
-Logger.log('saveLatenessRecord error: ' + error.toString());
-return { success: false, message: 'Failed to save: ' + error.toString() };
-}
+    var id = 'LATE' + new Date().getTime();
+    // Fix: Interpret record.date (YYYY-MM-DD) as LOCAL time
+    var recordDate;
+    if (record.date) {
+      var parts = record.date.split('-');
+      recordDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    } else {
+      var now = new Date();
+      recordDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+    // Logic separation: Real Late vs Activity Late
+    var isRealLate = (record.recordType === 'Real Late' || record.recordType === '8:00');
+    var isActivityLate = (record.recordType === 'Activity Late' || record.recordType === '7:40');
+    // --- CALCULATE STRIKE COUNT (Activity Late Only) ---
+    var strikeCount = 0;
+    if (isActivityLate && record.studentId) {
+      // Get existing count for this month + 1
+      strikeCount = getMonthlyActivityLateCount(record.studentId) + 1;
+    } else if (isRealLate) {
+      strikeCount = 1; // Real late doesn't use the monthly 1-2-3 ladder in the same way
+    }
+    // 1. Save to Lateness_Log Sheet
+    latenessSheet.appendRow([
+      id,                                         // ID
+      Utilities.formatDate(recordDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+      record.time || '',                          // Time
+      record.studentId || '',                     // StudentID
+      record.studentName || '',                   // StudentName
+      record.class || '',                         // Class
+      record.reason || '',                        // Reason
+      record.recordedBy || '',                    // RecordedBy
+      record.recordType || '',                    // RecordType
+      record.status || 'Pending',                 // Status
+      strikeCount,                                // StrikeCount
+      '', '', '', '', '', '', ''                  // Placeholders for review columns
+    ]);
+    // 2. Integration: Bonus Update
+    if (record.studentId) {
+      try { updateBonusEligibility(record.studentId, recordDate); } catch (e) { console.error(e); }
+    }
+    // 3. --- STRICT THAI MESSAGING RULES ---
+    var actionMessage = '';
+    if (isActivityLate) {
+      if (strikeCount === 1) {
+        actionMessage = 'Strike 1: นักเรียนได้รับการตักเตือนและแจ้งผู้ปกครอง';
+      } else if (strikeCount === 2) {
+        actionMessage = 'Strike 2: งดเบรค (Lunch Detention) + แจ้งเตือนผู้ปกครองเรื่องนัดพบ';
+      } else if (strikeCount >= 3) {
+        actionMessage = 'Strike 3: เชิญผู้ปกครอง + นัดหมาย (3 ครั้ง/เดือน)';
+      }
+    } else if (isRealLate) {
+      // Optional: Add specific message for Real Late if needed
+      actionMessage = 'Real Late: หัก 10 คะแนน + วิ่ง (ตามกฎ)';
+    }
+    return { success: true, message: 'บันทึกสำเร็จ', id: id, action: actionMessage };
+  } catch (error) {
+    Logger.log('saveLatenessRecord error: ' + error.toString());
+    return { success: false, message: 'Failed to save: ' + error.toString() };
+  }
 }
 
 function getPendingLatenessForHRT(filter) {
@@ -1650,17 +1650,17 @@ function logHrtAction(latenessId, action, notes, actedBy) {
     // --- STRICT RULES ENGINE ---
     if (monthlyStrikeCount === 1) {
       responseMessage = 'Strike 1: นักเรียนได้รับการตักเตือนและแจ้งผู้ปกครอง';
-    } 
+    }
     else if (monthlyStrikeCount === 2) {
       responseMessage = 'Strike 2: งดเบรค (Lunch Detention) + แจ้งเตือนผู้ปกครองเรื่องนัดพบ';
-    } 
+    }
     else if (monthlyStrikeCount >= 3) {
       // --- STRIKE 3: AUTO-GENERATE MEETING REQUEST ---
       responseMessage = 'Strike 3: เชิญผู้ปกครอง + นัดหมาย (3 ครั้ง/เดือน)';
-      
+
       if (cdrSheet) {
         cdrId = 'CDR_AUTO_' + new Date().getTime();
-        
+
         // Auto-insert into CDR_Log
         cdrSheet.appendRow([
           cdrId,                                // ID
@@ -1680,9 +1680,9 @@ function logHrtAction(latenessId, action, notes, actedBy) {
           'เชิญผู้ปกครอง + นัดหมาย',            // Punishment
           0                                     // Deduction
         ]);
-        
+
         autoCreatedCDR = true;
-        
+
         // Optional: Send Email Trigger here if needed
       }
     }
@@ -2904,19 +2904,19 @@ function hasExistingLatenessRecord(studentId, dateStr) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var latenessSheet = ss.getSheetByName('Lateness_Log');
   if (!latenessSheet) return false;
-  
+
   var data = latenessSheet.getDataRange().getValues();
   var normalizedStudentId = String(studentId).trim();
   var normalizedDateStr = dateStr.split('T')[0]; // Ensure YYYY-MM-DD format
   var timeZone = Session.getScriptTimeZone();
-  
+
   for (var i = 1; i < data.length; i++) {
     var rowStudentId = String(data[i][3]).trim(); // StudentID column (index 3)
-    
+
     // Handle date value (could be Date object or string)
     var rowDateValue = data[i][1]; // Date column (index 1)
     if (!rowDateValue) continue;
-    
+
     var rowDate;
     if (rowDateValue instanceof Date) {
       rowDate = rowDateValue;
@@ -2927,12 +2927,298 @@ function hasExistingLatenessRecord(studentId, dateStr) {
         continue; // Skip invalid dates
       }
     }
-    
+
     var rowDateStr = Utilities.formatDate(rowDate, timeZone, 'yyyy-MM-dd');
     if (rowStudentId === normalizedStudentId && rowDateStr === normalizedDateStr) {
       return true;
     }
   }
-  
+
   return false;
+}
+
+// ==========================================
+// REPORTS MODULE
+// ==========================================
+
+/**
+ * Fetch all unique classes from Students sheet for dropdowns
+ */
+function getAllClasses() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Students');
+  var classes = [];
+
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    // Start from row 1 to skip header
+    for (var i = 1; i < data.length; i++) {
+      var c = String(data[i][2]).trim(); // Col C is Class
+      if (c && classes.indexOf(c) === -1) {
+        classes.push(c);
+      }
+    }
+  }
+  return classes.sort();
+}
+
+/**
+ * Get list of students for a specific class
+ */
+function getStudentsByClass(classId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Students');
+  var students = [];
+
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    // Schema: ID(0), Name(1), Class(2), ...
+    for (var i = 1; i < data.length; i++) {
+      var sClass = String(data[i][2]).trim();
+      if (sClass === String(classId).trim()) {
+        students.push({
+          studentId: data[i][0],
+          name: data[i][1],
+          class: sClass
+        });
+      }
+    }
+  }
+  return students;
+}
+
+/**
+ * Lookup HRT for a class
+ */
+function getClassTeacher(className) {
+  if (!className) return "ไม่ระบุ";
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var usersSheet = ss.getSheetByName('Users');
+  var data = usersSheet.getDataRange().getValues();
+
+  // Users Schema: [Username(0), Password(1), FullName(2), Role(3), AssignedClasses(4), Email(5), Status(6)...]
+  for (var i = 1; i < data.length; i++) {
+    var role = data[i][3];
+    var status = data[i][6];
+    if ((role === 'HRT' || role === 'Teacher') && status === 'Active') {
+      var assigned = String(data[i][4]).split(',');
+      for (var j = 0; j < assigned.length; j++) {
+        if (assigned[j].trim() === String(className).trim()) {
+          return data[i][2]; // Return FullName
+        }
+      }
+    }
+  }
+  return "ไม่ระบุ"; // Not Found
+}
+
+/**
+ * Generate Monthly Class Report (List of Incidents)
+ */
+function getMonthlyClassReport(classId, monthStr) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var latenessSheet = ss.getSheetByName('Lateness_Log');
+
+    // 1. Setup Data
+    var teacherName = getClassTeacher(classId);
+    var records = [];
+    var summary = {
+      totalRecords: 0,
+      activityLate: 0,
+      realLate: 0,
+      studentCounts: {} // Accumulate per student
+    };
+
+    if (!latenessSheet) return { success: false, message: 'Lateness_Log not found' };
+
+    var data = latenessSheet.getDataRange().getValues();
+    var timeZone = Session.getScriptTimeZone();
+
+    // 2. Parse Target Month (YYYY-MM)
+    var parts = monthStr.split('-');
+    var targetYear = parseInt(parts[0], 10);
+    var targetMonth = parseInt(parts[1], 10) - 1; // JS Months are 0-11
+
+    // 3. Loop Data
+    // Schema: ID(0), Date(1), Time(2), StudentID(3), StudentName(4), Class(5), Reason(6), RecordedBy(7), RecordType(8), Status(9), StrikeCount(10)
+    for (var i = 1; i < data.length; i++) {
+      var rowClass = String(data[i][5]).trim();
+      var rowDateValue = data[i][1];
+
+      if (!rowDateValue || rowClass !== String(classId).trim()) continue;
+
+      var rowDate = new Date(rowDateValue);
+      if (isNaN(rowDate.getTime())) continue;
+
+      // Check Month/Year
+      if (rowDate.getFullYear() !== targetYear || rowDate.getMonth() !== targetMonth) continue;
+
+      // Extract Data - Normalize Type
+      var rawType = data[i][8];
+      var type;
+      if (rawType instanceof Date) {
+        var h = rawType.getHours();
+        var m = rawType.getMinutes();
+        // Check for 7:40 vs 8:00
+        if (h === 7 && m === 40) type = 'สายกิจกรรม 7:40 (Activity Late)';
+        else type = 'สายเข้าเรียน 8:00+ (Real Late)';
+      } else {
+        var tStr = String(rawType);
+        if (tStr.includes('7:40') || tStr === 'Activity Late') type = 'สายกิจกรรม 7:40 (Activity Late)';
+        else type = 'สายเข้าเรียน 8:00+ (Real Late)';
+      }
+
+      var isReal = (type.includes('Real Late'));
+      var isActivity = (type.includes('Activity Late'));
+
+      // Update Summary
+      summary.totalRecords++;
+      if (isReal) summary.realLate++;
+      if (isActivity) summary.activityLate++;
+
+      var sName = String(data[i][4]);
+      if (!summary.studentCounts[sName]) summary.studentCounts[sName] = 0;
+      summary.studentCounts[sName]++;
+
+      // Format Time
+      var rawTime = data[i][2];
+      var timeStr = (rawTime instanceof Date) ? Utilities.formatDate(rawTime, timeZone, 'HH:mm') : String(rawTime);
+
+      // Format Date
+      var dateThai = Utilities.formatDate(rowDate, timeZone, 'dd/MM/yyyy'); // Simple format, UI can make it nicer
+
+      records.push({
+        date: dateThai,
+        time: timeStr,
+        studentName: sName,
+        reason: String(data[i][6]),
+        count: data[i][10] || 1, // Strike Count
+        status: String(data[i][9]),
+        type: type
+      });
+    }
+
+    // Sort by Date Descending
+    records.sort(function (a, b) {
+      // Split DD/MM/YYYY to compare
+      var da = a.date.split('/');
+      var db = b.date.split('/');
+      // YYYYMMDD string compare
+      return (db[2] + db[1] + db[0]).localeCompare(da[2] + da[1] + da[0]);
+    });
+
+    return {
+      success: true,
+      report: {
+        className: classId,
+        teacherName: teacherName,
+        month: monthStr,
+        records: records,
+        summary: summary
+      }
+    };
+
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+/**
+ * Generate Individual Student Report
+ */
+function getStudentLatenessReport(studentId, monthStr) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var latenessSheet = ss.getSheetByName('Lateness_Log');
+    var studentSheet = ss.getSheetByName('Students');
+
+    // Lookup Student Name/Class
+    var studentName = "";
+    var studentClass = "";
+    if (studentSheet) {
+      var sData = studentSheet.getDataRange().getValues();
+      for (var k = 1; k < sData.length; k++) {
+        if (String(sData[k][0]) === String(studentId)) {
+          studentName = sData[k][1];
+          studentClass = sData[k][2];
+          break;
+        }
+      }
+    }
+
+    var records = [];
+    if (!latenessSheet) return { success: false, message: 'Lateness_Log not found' };
+
+    var data = latenessSheet.getDataRange().getValues();
+    var timeZone = Session.getScriptTimeZone();
+
+    var parts = monthStr.split('-');
+    var targetYear = parseInt(parts[0], 10);
+    var targetMonth = parseInt(parts[1], 10) - 1;
+
+    for (var i = 1; i < data.length; i++) {
+      var rowId = String(data[i][3]).trim();
+      var rowDateValue = data[i][1];
+
+      if (!rowDateValue || rowId !== String(studentId).trim()) continue;
+
+      var rowDate = new Date(rowDateValue);
+      if (rowDate.getFullYear() !== targetYear || rowDate.getMonth() !== targetMonth) continue;
+
+      // Extract Data
+      var rawTime = data[i][2];
+      var timeStr = (rawTime instanceof Date) ? Utilities.formatDate(rawTime, timeZone, 'HH:mm') : String(rawTime);
+      var dateThai = Utilities.formatDate(rowDate, timeZone, 'dd/MM/yyyy');
+
+      // Normalize Type for Display
+      var rawType = data[i][8];
+      var type;
+      if (rawType instanceof Date) {
+        var h = rawType.getHours();
+        var m = rawType.getMinutes();
+        if (h === 7 && m === 40) type = 'สายกิจกรรม 7:40 (Activity Late)';
+        else type = 'สายเข้าเรียน 8:00+ (Real Late)';
+      } else {
+        var tStr = String(rawType);
+        if (tStr.includes('7:40') || tStr === 'Activity Late') type = 'สายกิจกรรม 7:40 (Activity Late)';
+        else type = 'สายเข้าเรียน 8:00+ (Real Late)';
+      }
+
+      records.push({
+        date: dateThai,
+        time: timeStr,
+        studentName: String(data[i][4]), // Should match
+        reason: String(data[i][6]),
+        count: data[i][10] || 1,
+        status: String(data[i][9]),
+        type: type
+      });
+    }
+
+    // Sort Date Ascending for History
+    records.sort(function (a, b) {
+      var da = a.date.split('/');
+      var db = b.date.split('/');
+      return (da[2] + da[1] + da[0]).localeCompare(db[2] + db[1] + db[0]);
+    });
+
+    var teacherName = getClassTeacher(studentClass);
+
+    return {
+      success: true,
+      report: {
+        studentName: studentName,
+        studentId: studentId,
+        className: studentClass,
+        teacherName: teacherName,
+        month: monthStr,
+        records: records,
+        totalLate: records.length
+      }
+    };
+
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
 }

@@ -8,6 +8,9 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- pdfmake for programmatic PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap');
 
@@ -58,43 +61,102 @@
             /* Firefox */
         }
 
+        @media print {
+            @page {
+                size: A4;
+                margin: 5mm;
+            }
+
+            body {
+                background: white;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+
+            #sidebar,
+            #bottomNav,
+            #topBar,
+            .no-print,
+            #loginScreen {
+                display: none !important;
+            }
+
+            #mainApp {
+                margin: 0 !important;
+                padding: 0 !important;
+                display: block !important;
+            }
+
+            .md\:ml-64 {
+                margin-left: 0 !important;
+            }
+
+            #contentArea {
+                padding: 0 !important;
+            }
+
+            #reportCard {
+                box-shadow: none !important;
+                border: none !important;
+                width: 100% !important;
+            }
+
+            table {
+                page-break-inside: auto;
+            }
+
+            tr {
+                page-break-inside: avoid;
+                page-break-after: auto;
+            }
+
+            thead {
+                display: table-header-group;
+            }
+
+            tfoot {
+                display: table-footer-group;
+            }
+        }
+
         /* Make table responsive on mobile */
         .table-container {
-          overflow-x: auto;
-          -webkit-overflow-scrolling: touch;
-          width: 100%;
-          margin-bottom: 15px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            width: 100%;
+            margin-bottom: 15px;
         }
 
         .cdr-table {
-          min-width: 600px; /* Wider than mobile screens to trigger scrolling */
-          width: 100%;
+            min-width: 600px;
+            /* Wider than mobile screens to trigger scrolling */
+            width: 100%;
         }
 
         /* Keep table headers sticky during horizontal scroll */
         .cdr-table thead tr {
-          position: sticky;
-          top: 0;
-          background-color: #f0f7ff;
-          z-index: 10;
+            position: sticky;
+            top: 0;
+            background-color: #f0f7ff;
+            z-index: 10;
         }
 
         /* Optional: Add subtle scrollbar styling for better UX */
         .table-container::-webkit-scrollbar {
-          height: 8px;
+            height: 8px;
         }
 
         .table-container::-webkit-scrollbar-track {
-          background: #f1f1f1;
+            background: #f1f1f1;
         }
 
         .table-container::-webkit-scrollbar-thumb {
-          background: #c1c1c1;
-          border-radius: 4px;
+            background: #c1c1c1;
+            border-radius: 4px;
         }
 
         .table-container::-webkit-scrollbar-thumb:hover {
-          background: #a8a8a8;
+            background: #a8a8a8;
         }
     </style>
     <style>
@@ -127,8 +189,8 @@
                     class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200">
                     เข้าสู่ระบบ </button>
             </form>
-            </div>
         </div>
+    </div>
     </div><!-- Main App -->
     <div id="mainApp" class="hidden"><!-- Desktop Sidebar -->
         <div id="sidebar" class="hidden md:flex fixed left-0 top-0 h-full w-64 bg-blue-900 text-white z-40 flex-col">
@@ -193,7 +255,7 @@
 
         <!-- Main Content -->
         <div class="md:ml-64 mb-16 md:mb-0"><!-- Top Bar -->
-            <div class="bg-white shadow-md p-4 flex justify-between items-center">
+            <div id="topBar" class="bg-white shadow-md p-4 flex justify-between items-center">
                 <!-- Page Title (Left) -->
                 <h1 class="text-2xl font-bold text-blue-600 truncate" id="pageTitle">Dashboard</h1>
 
@@ -221,6 +283,7 @@
     <script>
         let currentUser = null;
         let currentLanguage = 'th';
+        let currentReportData = null; // Store report data for PDF download
         // PROTECTED: Global cache for Rapid Entry performance
         let studentCache = {};
 
@@ -263,22 +326,22 @@
         let kioskStudent = null;
 
         function showLoginScreen() {
-    // Ensure DOM is fully loaded before manipulating
-    if (!document.getElementById('loginScreen')) {
-        // If DOM not ready, wait and try again
-        setTimeout(showLoginScreen, 100);
-        return;
-    }
-    
-    document.getElementById('mainApp').classList.add('hidden');
-    const loginContainer = document.getElementById('loginScreen');
-    loginContainer.classList.remove('hidden');
+            // Ensure DOM is fully loaded before manipulating
+            if (!document.getElementById('loginScreen')) {
+                // If DOM not ready, wait and try again
+                setTimeout(showLoginScreen, 100);
+                return;
+            }
 
-    // Clear any existing content first
-    loginContainer.innerHTML = '';
+            document.getElementById('mainApp').classList.add('hidden');
+            const loginContainer = document.getElementById('loginScreen');
+            loginContainer.classList.remove('hidden');
 
-    // Render the Choice Screen (Admin vs PIN)
-    loginContainer.innerHTML = `
+            // Clear any existing content first
+            loginContainer.innerHTML = '';
+
+            // Render the Choice Screen (Admin vs PIN)
+            loginContainer.innerHTML = `
         <div class="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center relative">
             <img src="https://img5.pic.in.th/file/secure-sv1/IQRA-LOGO.png" alt="Logo" class="h-24 mx-auto mb-6">
             <h1 class="text-3xl font-bold text-blue-600 mb-2">Smart CDR</h1>
@@ -305,13 +368,13 @@
             <div class="mt-8 text-xs text-gray-400">System v2.2 • Iqra Muslim School</div>
         </div>
     `;
-}
+        }
 
         function renderStandardLogin() {
-    const loginContainer = document.getElementById('loginScreen');
+            const loginContainer = document.getElementById('loginScreen');
 
-    // Restore the original Email/Password Form
-    loginContainer.innerHTML = `
+            // Restore the original Email/Password Form
+            loginContainer.innerHTML = `
 <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md relative">
     <button onclick="showLoginScreen()" class="absolute top-4 left-4 text-gray-400 hover:text-gray-600">← Back</button>
     <div class="text-center mb-6">
@@ -332,7 +395,7 @@
     </form>
 </div>
 `;
-}
+        }
 
         // Global Kiosk PIN State
         let currentKioskPin = '';
@@ -888,42 +951,42 @@
             Swal.fire({ title: 'Saving...', didOpen: () => Swal.showLoading() });
 
             google.script.run.withSuccessHandler((res) => {
-            Swal.close();
-            // Handle duplicate error
-            if (res.duplicate) {
-            Swal.fire({
-            icon: 'warning',
-            title: 'บันทึกซ้ำ',
-            text: 'นักเรียนคนนี้มีข้อมูลการมาสายในวันนี้อยู่แล้ว',
-            confirmButtonText: 'ตกลง',
-            confirmButtonColor: '#3B82F6'
-            });
-            return;
-            }
+                Swal.close();
+                // Handle duplicate error
+                if (res.duplicate) {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'บันทึกซ้ำ',
+                        text: 'นักเรียนคนนี้มีข้อมูลการมาสายในวันนี้อยู่แล้ว',
+                        confirmButtonText: 'ตกลง',
+                        confirmButtonColor: '#3B82F6'
+                    });
+                    return;
+                }
 
-            let msg = `${kioskStudent.name} - ${finalReason}`;
-            let icon = 'success';
-            let title = 'Recorded!';
-            let timer = 1500;
-            let showConfirm = false;
-            // CHECK ACTION MESSAGE (Monthly Logic)
-            if (res.action) {
-            msg += `
+                let msg = `${kioskStudent.name} - ${finalReason}`;
+                let icon = 'success';
+                let title = 'Recorded!';
+                let timer = 1500;
+                let showConfirm = false;
+                // CHECK ACTION MESSAGE (Monthly Logic)
+                if (res.action) {
+                    msg += `
             ${res.action}`;
-            timer = 5000;
-            showConfirm = true;
-            if (res.action.includes('CRITICAL') || res.action.includes('Warning')) icon = 'warning';
-            }
-            Swal.fire({
-            icon: icon,
-            title: title,
-            text: msg,
-            timer: timer,
-            showConfirmButton: showConfirm,
-            didClose: () => {
-            renderKioskStudentInput(); // Loop back for next student
-            }
-            });
+                    timer = 5000;
+                    showConfirm = true;
+                    if (res.action.includes('CRITICAL') || res.action.includes('Warning')) icon = 'warning';
+                }
+                Swal.fire({
+                    icon: icon,
+                    title: title,
+                    text: msg,
+                    timer: timer,
+                    showConfirmButton: showConfirm,
+                    didClose: () => {
+                        renderKioskStudentInput(); // Loop back for next student
+                    }
+                });
             }).saveLatenessRecord(record);
         }
 
@@ -974,38 +1037,38 @@
 
 
         function initializeAppUI() {
-        // 1. Switch Screens
-        document.getElementById('loginScreen').classList.add('hidden');
-        const mainApp = document.getElementById('mainApp');
-        mainApp.classList.remove('hidden');
+            // 1. Switch Screens
+            document.getElementById('loginScreen').classList.add('hidden');
+            const mainApp = document.getElementById('mainApp');
+            mainApp.classList.remove('hidden');
 
-        // 2. Update User Profile Info
-        document.getElementById('currentUserName').textContent = currentUser.fullName;
-        document.getElementById('currentUserRole').textContent = currentUser.role;
-        document.getElementById('topBarUser').textContent = currentUser.fullName;
-        document.getElementById('mobileUserName').textContent = currentUser.fullName;
-        document.getElementById('mobileUserRole').textContent = currentUser.role;
+            // 2. Update User Profile Info
+            document.getElementById('currentUserName').textContent = currentUser.fullName;
+            document.getElementById('currentUserRole').textContent = currentUser.role;
+            document.getElementById('topBarUser').textContent = currentUser.fullName;
+            document.getElementById('mobileUserName').textContent = currentUser.fullName;
+            document.getElementById('mobileUserRole').textContent = currentUser.role;
 
-        // 3. Render Navigation
-        renderMenu();
+            // 3. Render Navigation
+            renderMenu();
 
-        // 4. MOBILE RENDERING FIX
-        // Mobile browsers need a moment to process the removal of '.hidden' 
-        // before they can correctly render the dashboard content.
-        if (window.innerWidth <= 768) {
-            setTimeout(() => {
-                // Force a "Reflow" (tells browser to recalculate layout immediately)
-                void mainApp.offsetHeight; 
-                
-                // Now load the page. We use loadPage() instead of loadDashboard()
-                // to ensure the title and window.currentPage state are set correctly.
+            // 4. MOBILE RENDERING FIX
+            // Mobile browsers need a moment to process the removal of '.hidden' 
+            // before they can correctly render the dashboard content.
+            if (window.innerWidth <= 768) {
+                setTimeout(() => {
+                    // Force a "Reflow" (tells browser to recalculate layout immediately)
+                    void mainApp.offsetHeight;
+
+                    // Now load the page. We use loadPage() instead of loadDashboard()
+                    // to ensure the title and window.currentPage state are set correctly.
+                    loadPage('dashboard');
+                }, 100); // 100ms delay is usually enough to fix the blank screen
+            } else {
+                // Desktop can handle immediate loading
                 loadPage('dashboard');
-            }, 100); // 100ms delay is usually enough to fix the blank screen
-        } else {
-            // Desktop can handle immediate loading
-            loadPage('dashboard');
+            }
         }
-    }
 
         function handleLoginSubmit(event) {
             event.preventDefault();
@@ -1514,6 +1577,8 @@
             // --- 1. HRT Verification Queue Logic ---
             if (role === 'HRT') {
                 google.script.run.withSuccessHandler((records) => {
+                    // DEFENSIVE: Ensure records is always an array before checking length
+                    records = records || [];
                     if (records.length > 0) {
                         renderVerificationQueue(records);
                     }
@@ -1582,30 +1647,30 @@
         }
 
         function renderSuperAdminDashboardUI(stats, pendingApprovals, pendingBonusDeductions, startStr, endStr) {
-    const contentArea = document.getElementById('contentArea');
-    const t = translations[currentLanguage];
+            const contentArea = document.getElementById('contentArea');
+            const t = translations[currentLanguage];
 
-    // --- CRASH FIX: Default all arrays to empty if they are null ---
-    stats = stats || {};
-    stats.topOffenses = stats.topOffenses || [];
-    stats.topClasses = stats.topClasses || [];
-    stats.totalCDR = stats.totalCDR || 0;
-    stats.level1 = stats.level1 || 0;
-    stats.level2 = stats.level2 || 0;
-    stats.totalLateness = stats.totalLateness || 0;
-    stats.activityLate = stats.activityLate || 0;
-    stats.realLate = stats.realLate || 0;
+            // --- CRASH FIX: Default all arrays to empty if they are null ---
+            stats = stats || {};
+            stats.topOffenses = stats.topOffenses || [];
+            stats.topClasses = stats.topClasses || [];
+            stats.totalCDR = stats.totalCDR || 0;
+            stats.level1 = stats.level1 || 0;
+            stats.level2 = stats.level2 || 0;
+            stats.totalLateness = stats.totalLateness || 0;
+            stats.activityLate = stats.activityLate || 0;
+            stats.realLate = stats.realLate || 0;
 
-    pendingApprovals = pendingApprovals || [];
-    pendingBonusDeductions = pendingBonusDeductions || [];
-    // -------------------------------------------------------------
+            pendingApprovals = pendingApprovals || [];
+            pendingBonusDeductions = pendingBonusDeductions || [];
+            // -------------------------------------------------------------
 
-    // 1. Bonus Deduction Queue (Real Late)
-    let bonusSection = '';
-    const realLateRecords = pendingBonusDeductions.filter(r => r.type === 'Real Late');
+            // 1. Bonus Deduction Queue (Real Late)
+            let bonusSection = '';
+            const realLateRecords = pendingBonusDeductions.filter(r => r.type === 'Real Late');
 
-    if (realLateRecords.length > 0) {
-        bonusSection = `
+            if (realLateRecords.length > 0) {
+                bonusSection = `
         <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-r shadow-md mb-6 animate-pulse">
             <div class="flex justify-between items-center mb-3">
                 <h3 class="font-bold text-red-900 flex items-center gap-2">
@@ -1627,12 +1692,12 @@
                 `).join('')}
             </div>
         </div>`;
-    }
+            }
 
-    // 2. Parent Meeting Approval Queue
-    let approvalSection = '';
-    if (pendingApprovals.length > 0) {
-        approvalSection = `
+            // 2. Parent Meeting Approval Queue
+            let approvalSection = '';
+            if (pendingApprovals.length > 0) {
+                approvalSection = `
         <div class="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-r shadow-md mb-6 animate-pulse">
             <div class="flex justify-between items-center mb-3">
                 <h3 class="font-bold text-amber-900 flex items-center gap-2">
@@ -1654,9 +1719,9 @@
                 `).join('')}
             </div>
         </div>`;
-    }
+            }
 
-    contentArea.innerHTML = `
+            contentArea.innerHTML = `
     <div class="space-y-6">
         ${bonusSection}
         ${approvalSection}
@@ -1732,7 +1797,7 @@
         </div>
     </div>
     `;
-}
+        }
 
         function approveRequest(cdrId) {
             showLoading('Approving...');
@@ -1766,6 +1831,11 @@
             ]).then(([stats, latenessResult, studentScores]) => {
                 hideLoading();
                 const contentArea = document.getElementById('contentArea');
+
+                // --- DEFENSIVE: Ensure arrays are never null ---
+                stats = stats || { pendingCases: 0, resolvedCases: 0, totalCDR: 0, level1: 0, level2: 0 };
+                latenessResult = latenessResult || { todayPendingCount: 0 };
+                studentScores = studentScores || [];
 
                 // --- AT-RISK MONITOR ---
                 const atRiskStudents = studentScores.filter(s => s.score < 80);
@@ -1819,7 +1889,7 @@
         // [OFFICE] Modal for HRT to Log Action on Activity Late
         window.showLogActionModal = function (id, studentName, strikeCount) {
             let title = 'จัดการการมาสาย (Activity Late)';
-            
+
             // 1. Define Exact Strings (Business Rules)
             const msgStrike1 = 'Strike 1: นักเรียนได้รับการตักเตือนและแจ้งผู้ปกครอง';
             const msgStrike2 = 'Strike 2: งดเบรค (Lunch Detention) + แจ้งเตือนผู้ปกครองเรื่องนัดพบ';
@@ -1896,15 +1966,15 @@
                 }
             }).then((result) => {
                 if (result.isConfirmed) {
-                    showLoading('กำลังบันทึกข้อมูล...'); 
-                    
+                    showLoading('กำลังบันทึกข้อมูล...');
+
                     google.script.run
                         .withSuccessHandler((res) => {
                             hideLoading();
                             if (res.success) {
                                 Swal.fire('บันทึกสำเร็จ', res.message, 'success');
                                 if (typeof loadManageLatenessPage === 'function') {
-                                    loadManageLatenessPage(); 
+                                    loadManageLatenessPage();
                                 }
                             } else {
                                 Swal.fire('เกิดข้อผิดพลาด', res.message, 'error');
@@ -2659,9 +2729,9 @@
         }
 
         function loadCDRPage() {
-    // Render the Container & Controls
-    const contentArea = document.getElementById('contentArea');
-    contentArea.innerHTML = `
+            // Render the Container & Controls
+            const contentArea = document.getElementById('contentArea');
+            contentArea.innerHTML = `
 <div class="max-w-7xl mx-auto">
      <div class="flex flex-col md:flex-row justify-between items-center mb-6">
         <div>
@@ -2728,11 +2798,11 @@
 </div>
 `;
 
-    // Load Initial Data
-    window.cdrCurrentOffset = 0;
-    window.cdrPageSize = 25;
-    fetchCDRData();
-}
+            // Load Initial Data
+            window.cdrCurrentOffset = 0;
+            window.cdrPageSize = 25;
+            fetchCDRData();
+        }
 
         // Debounce Utility
         window.debounce = function (func, wait) {
@@ -2744,41 +2814,41 @@
         };
 
 
-      window.fetchCDRData = function (resetPage = true) {
-          if (resetPage) window.cdrCurrentOffset = 0;
+        window.fetchCDRData = function (resetPage = true) {
+            if (resetPage) window.cdrCurrentOffset = 0;
 
-          const search = document.getElementById('cdrFilterSearch').value;
-          const level = document.getElementById('cdrFilterLevel').value;
-          const status = document.getElementById('cdrFilterStatus').value;
+            const search = document.getElementById('cdrFilterSearch').value;
+            const level = document.getElementById('cdrFilterLevel').value;
+            const status = document.getElementById('cdrFilterStatus').value;
 
-          const filter = {
-              role: currentUser.role,
-              assignedClasses: currentUser.assignedClasses,
-              offset: window.cdrCurrentOffset,
-              limit: window.cdrPageSize,
-              offenseType: level === 'Level 1' ? 'A' : (level === 'Level 2' ? 'B' : ''),
-              status: status
-          };
+            const filter = {
+                role: currentUser.role,
+                assignedClasses: currentUser.assignedClasses,
+                offset: window.cdrCurrentOffset,
+                limit: window.cdrPageSize,
+                offenseType: level === 'Level 1' ? 'A' : (level === 'Level 2' ? 'B' : ''),
+                status: status
+            };
 
-          const tbody = document.getElementById('cdrTableBody');
-          tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-gray-400"><div class="animate-pulse">Fetching records...</div></td></tr>';
+            const tbody = document.getElementById('cdrTableBody');
+            tbody.innerHTML = '<tr><td colspan="7" class="p-8 text-center text-gray-400"><div class="animate-pulse">Fetching records...</div></td></tr>';
 
-          google.script.run.withSuccessHandler(response => {
-              if (response && response.success) {
-                  // --- CRASH FIX: Ensure response.data is an array ---
-                  const data = response.data || []; 
-                  // --------------------------------------------------
-                  
-                  renderCDRTable(data, search);
+            google.script.run.withSuccessHandler(response => {
+                if (response && response.success) {
+                    // --- CRASH FIX: Ensure response.data is an array ---
+                    const data = response.data || [];
+                    // --------------------------------------------------
 
-                  document.getElementById('btnPrev').disabled = window.cdrCurrentOffset === 0;
-                  document.getElementById('btnNext').disabled = data.length < window.cdrPageSize;
-                  document.getElementById('cdrCountLabel').textContent = `Showing ${data.length} records`;
-              } else {
-                  tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">Error: ${response ? response.message : 'Unknown Error'}</td></tr>`;
-              }
-          }).getCDRRecords(filter);
-      }
+                    renderCDRTable(data, search);
+
+                    document.getElementById('btnPrev').disabled = window.cdrCurrentOffset === 0;
+                    document.getElementById('btnNext').disabled = data.length < window.cdrPageSize;
+                    document.getElementById('cdrCountLabel').textContent = `Showing ${data.length} records`;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">Error: ${response ? response.message : 'Unknown Error'}</td></tr>`;
+                }
+            }).getCDRRecords(filter);
+        }
 
         window.changeCDRPage = function (direction) {
             window.cdrCurrentOffset += (direction * window.cdrPageSize);
@@ -3115,9 +3185,13 @@
         function loadAttendancePage() {
             showLoading(currentLanguage === 'th' ? 'กำลังตรวจสอบข้อมูลการเช็คชื่อ...' : 'Checking attendance data...');
             google.script.run.withSuccessHandler(function (attendanceToday) {
+                // DEFENSIVE: Ensure attendanceToday is always an array
+                attendanceToday = attendanceToday || [];
                 google.script.run.withSuccessHandler(function (students) {
                     hideLoading();
-                    if (!students || students.length === 0) {
+                    // DEFENSIVE: Ensure students is always an array
+                    students = students || [];
+                    if (students.length === 0) {
                         Swal.fire('Info', 'ไม่พบรายชื่อนักเรียน', 'info');
                         return;
                     }
@@ -3284,7 +3358,9 @@
             const contentArea = document.getElementById('contentArea');
             const today = new Date().toLocaleDateString(currentLanguage === 'th' ? 'th-TH' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-            const hasExistingData = tidinessThisWeek && tidinessThisWeek.length > 0;
+            // DEFENSIVE: Ensure tidinessThisWeek is always an array
+            tidinessThisWeek = tidinessThisWeek || [];
+            const hasExistingData = tidinessThisWeek.length > 0;
             const tidinessMap = {};
             if (hasExistingData) {
                 tidinessThisWeek.forEach(record => {
@@ -4511,6 +4587,624 @@
                 sb.classList.remove('active');
             }
         });
+
+        // ==========================================
+        // REPORTS MODULE FRONTEND
+        // ==========================================
+        let currentReportType = 'class'; // 'class' or 'student'
+
+        function loadReportsPage() {
+            renderReportsPageUI();
+        }
+
+        function renderReportsPageUI() {
+            const content = document.getElementById('contentArea');
+            const t = translations[currentLanguage];
+
+            content.innerHTML = `
+      <div class="max-w-5xl mx-auto">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-6 no-print">
+            <div>
+                 <h2 class="text-lg sm:text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    📊 ${currentLanguage === 'th' ? 'รายงานการมาสาย' : 'Lateness Reports'}
+                 </h2>
+                 <p class="text-xs sm:text-sm text-gray-500">Generate monthly class or student reports</p>
+            </div>
+            
+            <div class="flex gap-2">
+                <button onclick="printReportWithFilename()" class="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 flex items-center gap-2 transition-transform active:scale-95">
+                    <span>🖨️</span> <span class="hidden md:inline">Print</span>
+                </button>
+                <button onclick="downloadReportPDF()" class="bg-red-600 text-white px-4 py-2 rounded-lg shadow hover:bg-red-700 flex items-center gap-2 transition-transform active:scale-95">
+                    <span>⬇️</span> <span class="hidden md:inline">Download PDF</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Filter Panel -->
+        <div class="bg-white rounded-xl shadow-sm p-4 md:p-6 mb-8 no-print border border-gray-100">
+            <!-- Report Type Toggle -->
+             <div class="flex flex-col sm:flex-row gap-3 mb-6">
+                <button onclick="setReportType('class')" id="btnTypeClass" class="flex-1 py-3 px-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 font-bold transition-all flex justify-center items-center gap-2 text-sm sm:text-base">
+                    📋 ${currentLanguage === 'th' ? 'รายงานห้อง (Class)' : 'Class Report'}
+                </button>
+                <button onclick="setReportType('student')" id="btnTypeStudent" class="flex-1 py-3 px-4 rounded-lg border-2 border-gray-200 bg-white text-gray-500 font-medium hover:bg-gray-50 transition-all flex justify-center items-center gap-2 text-sm sm:text-base">
+                    👤 ${currentLanguage === 'th' ? 'รายงานนักเรียน (Student)' : 'Student Report'}
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Class Selector -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Select Class</label>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🏫</span>
+                        <select id="reportClassSelect" class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-gray-50 outline-none" onchange="handleReportClassChange()">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Student Selector (For Individual Report) -->
+                <div id="studentSelectContainer" class="hidden">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Select Student</label>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🎓</span>
+                        <select id="reportStudentSelect" class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-gray-50 outline-none" disabled>
+                            <option value="">-- Select Class First --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Month Selector -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">Select Month</label>
+                    <div class="relative">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">📅</span>
+                        <input type="month" id="reportMonthInput" class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-gray-50 outline-none">
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="generateReport()" class="w-full mt-6 bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 shadow-lg transition-transform active:scale-95 flex justify-center items-center gap-2 text-lg">
+                <span>🚀</span> Generate Report
+            </button>
+        </div>
+
+        <!-- Report Card (Printable) -->
+        <div id="reportCard" class="hidden bg-white rounded-xl shadow-lg border border-gray-200 mx-auto print:shadow-none print:border-none print:w-full">
+            <!-- Dynamic Content -->
+        </div>
+      </div>
+    `;
+
+            // Set default month to current
+            const now = new Date();
+            const monthStr = now.toISOString().slice(0, 7);
+            document.getElementById('reportMonthInput').value = monthStr;
+
+            // Load Classes
+            loadReportClasses();
+        }
+
+        function printReportWithFilename() {
+            const monthInput = document.getElementById('reportMonthInput').value;
+            let filename = 'Monthly Lateness Report';
+
+            if (monthInput) {
+                const [year, month] = monthInput.split('-');
+                const date = new Date(parseInt(year), parseInt(month) - 1);
+                // Get English month name for filename
+                const monthName = date.toLocaleString('en-US', { month: 'long' });
+                filename = `Monthly Lateness report_${monthName} ${year}`;
+            }
+
+            // Store original title
+            const originalTitle = document.title;
+
+            // Set new title for print filename
+            document.title = filename;
+
+            // Print
+            window.print();
+
+            // Restore title (timeout to ensure print dialog picks it up)
+            setTimeout(() => {
+                document.title = originalTitle;
+            }, 500);
+        }
+
+        async function downloadReportPDF() {
+            // 1. Validate Data
+            if (!currentReportData || !currentReportData.report) {
+                Swal.fire('Error', 'Please generate a report first.', 'error');
+                return;
+            }
+
+            const report = currentReportData.report;
+            const records = report.records || [];
+
+            // 2. Show Loading
+            Swal.fire({
+                title: 'Generating PDF...',
+                text: 'Loading font...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                // 3. Fetch Kanit Font and convert to base64 (chunked to avoid stack overflow)
+                const fontUrl = 'https://fonts.gstatic.com/s/kanit/v15/nKKZ-Go6G5tXcoaSEQGodLxA.ttf';
+                const fontResponse = await fetch(fontUrl);
+                const fontBuffer = await fontResponse.arrayBuffer();
+
+                // Convert ArrayBuffer to base64 in chunks (avoids stack overflow)
+                const bytes = new Uint8Array(fontBuffer);
+                let binary = '';
+                const chunkSize = 8192;
+                for (let i = 0; i < bytes.length; i += chunkSize) {
+                    const chunk = bytes.subarray(i, i + chunkSize);
+                    binary += String.fromCharCode.apply(null, chunk);
+                }
+                const fontBase64 = btoa(binary);
+
+                // 4. Register Kanit font with pdfmake
+                pdfMake.vfs = pdfMake.vfs || {};
+                pdfMake.vfs['Kanit-Regular.ttf'] = fontBase64;
+                pdfMake.fonts = {
+                    Kanit: {
+                        normal: 'Kanit-Regular.ttf',
+                        bold: 'Kanit-Regular.ttf',
+                        italics: 'Kanit-Regular.ttf',
+                        bolditalics: 'Kanit-Regular.ttf'
+                    }
+                };
+
+                // 5. Build Filename (Class_9B1_Lateness_Report_January_2026)
+                const monthInput = document.getElementById('reportMonthInput').value;
+                let filename = 'Lateness_Report.pdf';
+                if (monthInput) {
+                    const [year, month] = monthInput.split('-');
+                    const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('en-US', { month: 'long' });
+
+                    if (currentReportType === 'class') {
+                        const className = report.className || 'Unknown';
+                        filename = `Class_${className}_Lateness_Report_${monthName}_${year}.pdf`;
+                    } else {
+                        const studentId = report.studentId || 'Unknown';
+                        filename = `Student_${studentId}_Lateness_Report_${monthName}_${year}.pdf`;
+                    }
+                }
+
+                // 6. Format Month for display
+                const [repYear, repMonth] = monthInput.split('-');
+                const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+                const monthThai = thaiMonths[parseInt(repMonth) - 1];
+                const yearThai = parseInt(repYear) + 543;
+
+                // 7. Build Table Body
+                const tableBody = [
+                    // Header Row
+                    [
+                        { text: 'วันที่', style: 'tableHeader' },
+                        { text: 'เวลา', style: 'tableHeader' },
+                        { text: 'ชื่อ', style: 'tableHeader' },
+                        { text: 'ประเภท', style: 'tableHeader' }, // Added Type Column
+                        { text: 'สาเหตุ', style: 'tableHeader' },
+                        { text: 'ครั้งที่', style: 'tableHeader' },
+                        { text: 'สถานะ', style: 'tableHeader' }
+                    ],
+                    // Data Rows
+                    ...records.map(r => [
+                        r.date || '',
+                        r.time || '',
+                        r.studentName || '',
+                        { text: r.type || '-', color: (r.type || '').includes('Real') ? '#991b1b' : '#854d0e', fontSize: 9 }, // Type Data
+                        r.reason || '',
+                        { text: String(r.count || ''), alignment: 'center' },
+                        { text: r.status || '', color: r.status === 'Logged' ? 'green' : (r.status === 'Pending' ? 'orange' : 'black') }
+                    ])
+                ];
+
+                // 8. Build Document Definition
+                const docDefinition = {
+                    defaultStyle: { font: 'Kanit', fontSize: 10 },
+                    pageSize: 'A4',
+                    pageMargins: [40, 40, 40, 40],
+                    content: [
+                        // Header
+                        { text: 'โรงเรียนอิกเราะสามัญศึกษา (Iqra Muslim School)', style: 'header', alignment: 'center' },
+                        { text: currentReportType === 'class' ? 'รายงานสรุปการมาสายประจำเดือน (Monthly Lateness Report)' : 'รายงานการมาสายรายบุคคล (Individual Student Report)', style: 'subheader', alignment: 'center', margin: [0, 0, 0, 20] },
+
+                        // Meta Info
+                        {
+                            columns: [
+                                { width: '*', text: [{ text: 'Class: ', bold: true }, report.className || ''] },
+                                { width: '*', text: [{ text: currentReportType === 'class' ? 'Teacher: ' : 'Student: ', bold: true }, currentReportType === 'class' ? (report.teacherName || '') : (report.studentName || '')] },
+                                { width: 'auto', text: [{ text: 'Month: ', bold: true }, `${monthThai} ${yearThai}`], alignment: 'right' }
+                            ],
+                            margin: [0, 0, 0, 10]
+                        },
+
+                        // Summary (Class Report Only)
+                        ...(currentReportType === 'class' ? [{
+                            columns: [
+                                { width: '*', text: [{ text: 'Total: ', bold: true }, String(report.summary?.totalRecords || 0)], alignment: 'center' },
+                                { width: '*', text: [{ text: 'Activity Late: ', bold: true, color: '#854d0e' }, String(report.summary?.activityLate || 0)], alignment: 'center' },
+                                { width: '*', text: [{ text: 'Real Late: ', bold: true, color: '#991b1b' }, String(report.summary?.realLate || 0)], alignment: 'center' }
+                            ],
+                            margin: [0, 0, 0, 20]
+                        }] : [{ text: [{ text: 'Total Late: ', bold: true }, String(report.totalLate || 0)], margin: [0, 0, 0, 20] }]),
+
+                        // Table
+                        {
+                            table: {
+                                headerRows: 1,
+                                widths: ['auto', 'auto', '*', 'auto', 'auto', 'auto', 'auto'],
+                                body: tableBody
+                            },
+                            layout: {
+                                hLineWidth: () => 0.5,
+                                vLineWidth: () => 0.5,
+                                hLineColor: () => '#e5e7eb',
+                                vLineColor: () => '#e5e7eb',
+                                fillColor: (rowIndex) => rowIndex === 0 ? '#f3f4f6' : null
+                            }
+                        },
+
+                        // Footer
+                        { text: `Printed: ${new Date().toLocaleDateString('th-TH')}`, alignment: 'right', margin: [0, 20, 0, 0], fontSize: 8, color: 'gray' },
+
+                        // Signature Section
+                        {
+                            columns: [
+                                {
+                                    stack: [
+                                        { text: '__________________________', margin: [0, 0, 0, 5] },
+                                        { text: `( ${report.teacherName || '....................'} )`, margin: [0, 0, 0, 2] },
+                                        { text: 'Class Teacher', fontSize: 9, bold: true }
+                                    ],
+                                    alignment: 'center'
+                                },
+                                {
+                                    stack: [
+                                        { text: '__________________________', margin: [0, 0, 0, 5] },
+                                        { text: '( .................... )', margin: [0, 0, 0, 2] },
+                                        { text: 'Head of Student Affairs', fontSize: 9, bold: true }
+                                    ],
+                                    alignment: 'center'
+                                },
+                                {
+                                    stack: [
+                                        { text: '__________________________', margin: [0, 0, 0, 5] },
+                                        { text: '( .................... )', margin: [0, 0, 0, 2] },
+                                        { text: 'Vice Principal', fontSize: 9, bold: true }
+                                    ],
+                                    alignment: 'center'
+                                }
+                            ],
+                            margin: [0, 40, 0, 0]
+                        }
+                    ],
+                    styles: {
+                        header: { fontSize: 16, bold: true },
+                        subheader: { fontSize: 12, color: '#1e40af' },
+                        tableHeader: { bold: true, fillColor: '#f3f4f6' }
+                    }
+                };
+
+                // 9. Generate and Download
+                pdfMake.createPdf(docDefinition).download(filename);
+                Swal.close();
+
+            } catch (error) {
+                console.error('PDF Generation Error:', error);
+                Swal.close();
+                Swal.fire('Error', 'PDF generation failed: ' + error.message, 'error');
+            }
+        }
+
+        function setReportType(type) {
+            currentReportType = type;
+            const btnClass = document.getElementById('btnTypeClass');
+            const btnStudent = document.getElementById('btnTypeStudent');
+            const studentContainer = document.getElementById('studentSelectContainer');
+            const studentSelect = document.getElementById('reportStudentSelect');
+
+            // Reset Classes styles
+            btnClass.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-gray-200 bg-white text-gray-500 font-medium hover:bg-gray-50 transition-all flex justify-center items-center gap-2';
+            btnStudent.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-gray-200 bg-white text-gray-500 font-medium hover:bg-gray-50 transition-all flex justify-center items-center gap-2';
+
+            if (type === 'class') {
+                btnClass.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 font-bold transition-all flex justify-center items-center gap-2';
+                studentContainer.classList.add('hidden');
+            } else {
+                btnStudent.className = 'flex-1 py-3 px-4 rounded-lg border-2 border-blue-500 bg-blue-50 text-blue-700 font-bold transition-all flex justify-center items-center gap-2';
+                studentContainer.classList.remove('hidden');
+                // Trigger student load if class is selected
+                handleReportClassChange();
+            }
+        }
+
+        function loadReportClasses() {
+            const role = currentUser.role;
+            const select = document.getElementById('reportClassSelect');
+
+            const populate = (classes) => {
+                select.innerHTML = '<option value="">-- Select Class --</option>';
+                classes.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c;
+                    opt.textContent = c;
+                    select.appendChild(opt);
+                });
+            };
+
+            if (['Superadmin', 'VP', 'DisciplineDept'].includes(role)) {
+                google.script.run.withSuccessHandler(populate).getAllClasses();
+            } else {
+                // HRT/Teacher: Use assigned classes
+                const classes = currentUser.assignedClasses ? currentUser.assignedClasses.split(',') : [];
+                const cleanClasses = classes.map(c => c.trim()).filter(c => c);
+                populate(cleanClasses);
+            }
+        }
+
+        function handleReportClassChange() {
+            const classId = document.getElementById('reportClassSelect').value;
+            const studentSelect = document.getElementById('reportStudentSelect');
+
+            if (currentReportType !== 'student') return;
+
+            if (!classId) {
+                studentSelect.innerHTML = '<option value="">-- Select Class First --</option>';
+                studentSelect.disabled = true;
+                return;
+            }
+
+            studentSelect.innerHTML = '<option value="">Loading...</option>';
+            studentSelect.disabled = true;
+
+            google.script.run.withSuccessHandler(students => {
+                studentSelect.innerHTML = '<option value="">-- Select Student --</option>';
+                students.forEach(s => {
+                    // s is {studentId, name, class}
+                    const opt = document.createElement('option');
+                    opt.value = s.studentId;
+                    opt.textContent = `${s.name} (${s.studentId})`;
+                    studentSelect.appendChild(opt);
+                });
+                studentSelect.disabled = false;
+            }).getStudentsByClass(classId); // Reusing existing function in Code.js (if it exists)
+        }
+
+        function generateReport() {
+            const classId = document.getElementById('reportClassSelect').value;
+            const monthStr = document.getElementById('reportMonthInput').value;
+
+            if (!classId) {
+                Swal.fire('Error', 'Please select a class', 'warning');
+                return;
+            }
+            if (!monthStr) {
+                Swal.fire('Error', 'Please select a month', 'warning');
+                return;
+            }
+
+            const card = document.getElementById('reportCard');
+            card.classList.remove('hidden');
+            card.innerHTML = '<div class="p-10 text-center text-gray-500 flex flex-col items-center"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500 mb-4"></div>Generating Report...</div>';
+
+            if (currentReportType === 'class') {
+                google.script.run.withSuccessHandler(res => {
+                    if (res.success) {
+                        currentReportData = res; // Store for PDF
+                        renderClassReportCard(res.report);
+                    }
+                    else card.innerHTML = `<div class="p-10 text-center text-red-500">Error: ${res.message}</div>`;
+                }).getMonthlyClassReport(classId, monthStr);
+            } else {
+                const studentId = document.getElementById('reportStudentSelect').value;
+                if (!studentId) {
+                    Swal.fire('Error', 'Please select a student', 'warning');
+                    card.classList.add('hidden');
+                    return;
+                }
+                google.script.run.withSuccessHandler(res => {
+                    if (res.success) {
+                        currentReportData = res; // Store for PDF
+                        renderStudentReportCard(res.report);
+                    }
+                    else card.innerHTML = `<div class="p-10 text-center text-red-500">Error: ${res.message}</div>`;
+                }).getStudentLatenessReport(studentId, monthStr);
+            }
+        }
+
+        function renderClassReportCard(report) {
+            const card = document.getElementById('reportCard');
+            const records = report.records || [];
+            const summary = report.summary || {};
+
+            // Format Month
+            const [year, month] = report.month.split('-');
+            const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            const monthThai = thaiMonths[parseInt(month) - 1];
+            const yearThai = parseInt(year) + 543;
+
+            card.innerHTML = `
+        <div class="p-8">
+            <!-- Header -->
+            <div class="text-center mb-6">
+                <!-- Logo Removed Request -->
+                <h2 class="text-xl font-bold">โรงเรียนอิกเราะสามัญศึกษา (Iqra Muslim School)</h2>
+                <h3 class="text-lg font-semibold text-blue-800 mt-1">รายงานสรุปการมาสายประจำเดือน (Monthly Lateness Report)</h3>
+            </div>
+            
+            <!-- Meta Info -->
+             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b-2 border-blue-100 pb-4 mb-6 text-sm gap-4 sm:gap-0">
+                <div class="w-full sm:w-auto">
+                    <p class="flex flex-wrap justify-between sm:block gap-x-4"><strong>Class:</strong> <span class="text-right text-gray-700">${report.className}</span></p>
+                    <p class="flex flex-wrap justify-between sm:block gap-x-4"><strong>Teacher:</strong> <span class="text-right text-gray-700">${report.teacherName}</span></p>
+                    <p class="flex flex-wrap justify-between sm:block gap-x-4"><strong>Month:</strong> <span class="text-right text-gray-700">${monthThai} ${yearThai}</span></p>
+                </div>
+                <div class="w-full sm:w-auto text-right">
+                    <p class="flex justify-between sm:block"><strong>Printed:</strong> <span>${new Date().toLocaleDateString('th-TH')}</span></p>
+                    <p class="flex justify-between sm:block"><strong>Records:</strong> <span>${records.length}</span></p>
+                </div>
+            </div>
+
+            <!-- Summary Box -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 text-center text-sm print:hidden">
+                <div class="bg-gray-50 p-3 rounded-lg border">
+                    <span class="block text-gray-500">Total Late</span>
+                    <span class="text-xl font-bold text-gray-800">${summary.totalRecords}</span>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-100">
+                    <span class="block text-yellow-700">Activity Late</span>
+                    <span class="text-xl font-bold text-yellow-800">${summary.activityLate}</span>
+                </div>
+                <div class="bg-red-50 p-3 rounded-lg border border-red-100">
+                    <span class="block text-red-700">Real Late</span>
+                    <span class="text-xl font-bold text-red-800">${summary.realLate}</span>
+                </div>
+            </div>
+
+            <!-- Table -->
+            <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                <table class="w-full text-sm border-collapse min-w-[600px]">
+                    <thead>
+                        <tr class="bg-blue-50 text-blue-900 border-b border-blue-200">
+                            <th class="py-3 px-2 text-left w-24">วันที่ (Date)</th>
+                            <th class="py-3 px-2 text-left w-20">เวลา (Time)</th>
+                            <th class="py-3 px-2 text-left text-gray-800">ชื่อ (Name)</th>
+                            <th class="py-3 px-2 text-left w-32">สาเหตุ (Reason)</th>
+                            <th class="py-3 px-2 text-center w-20">จำนวนครั้ง (Count)</th>
+                            <th class="py-3 px-2 text-center w-28">สถานะ (Status)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${records.map((r, i) => `
+                        <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-100 hover:bg-blue-50">
+                            <td class="py-2 px-2">${r.date}</td>
+                            <td class="py-2 px-2 font-mono text-gray-600">${r.time}</td>
+                            <td class="py-2 px-2 font-semibold text-gray-800">${r.studentName}</td>
+                            <td class="py-2 px-2 text-gray-600 truncate max-w-[150px]">${r.reason}</td>
+                            <td class="py-2 px-2 text-center">
+                                <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold ${r.count > 2 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}">
+                                ${r.count}
+                                </span>
+                            </td>
+                            <td class="py-2 px-2 text-center">
+                                <span class="text-xs font-medium ${getStatusColor(r.status)}">${r.status}</span>
+                            </td>
+                        </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                 ${records.length === 0 ? '<p class="text-center text-gray-400 py-8">No lateness records found for this month.</p>' : ''}
+            </div>
+            
+            <!-- Signature Footer (Visible only in Print) -->
+             <div class="hidden print:flex justify-between mt-12 pt-8 text-sm">
+                <div class="text-center w-1/3">
+                    <div class="border-b border-gray-400 w-32 mx-auto mb-2"></div>
+                    <p>ลงชื่อครูประจำชั้น</p>
+                    <p class="text-xs text-gray-500">(${report.teacherName})</p>
+                </div>
+                <div class="text-center w-1/3">
+                    <div class="border-b border-gray-400 w-32 mx-auto mb-2"></div>
+                    <p>ลงชื่อฝ่ายปกครอง</p>
+                </div>
+            </div>
+        </div>
+    `;
+        }
+
+        function renderStudentReportCard(report) {
+            const card = document.getElementById('reportCard');
+            const records = report.records || [];
+
+            // Format Month
+            const [year, month] = report.month.split('-');
+            const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            const monthThai = thaiMonths[parseInt(month) - 1];
+            const yearThai = parseInt(year) + 543;
+
+            card.innerHTML = `
+        <div class="p-8">
+            <div class="text-center mb-8">
+                <!-- Logo Removed Request -->
+                <h2 class="text-xl font-bold">โรงเรียนอิกเราะสามัญศึกษา</h2>
+                <h3 class="text-lg text-blue-800">รายงานการมาสายรายบุคคล (Individual Student Report)</h3>
+            </div>
+            
+            <div class="bg-blue-50 rounded-lg p-6 mb-8 border border-blue-100">
+                 <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-500 text-xs uppercase font-bold">Student Name</p>
+                        <p class="text-xl font-bold text-gray-800">${report.studentName}</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-500 text-xs uppercase font-bold">Class / ID</p>
+                        <p class="text-lg text-gray-800 font-mono">${report.className} • ${report.studentId}</p>
+                    </div>
+                 </div>
+                 <div class="mt-4 pt-4 border-t border-blue-200">
+                    <p class="text-gray-500 text-xs uppercase font-bold">Reporting Month</p>
+                    <p class="text-gray-800">${monthThai} ${yearThai}</p>
+                 </div>
+            </div>
+
+            <h4 class="font-bold text-gray-700 mb-4 border-b pb-2">Lateness History</h4>
+            <div class="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                 <table class="w-full text-sm border-collapse min-w-[600px]">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-200 text-xs uppercase tracking-wider">
+                            <th class="py-2 text-left">วันที่</th>
+                            <th class="py-2 text-left">เวลา</th>
+                             <th class="py-2 text-left">ประเภท</th>
+                            <th class="py-2 text-left">สาเหตุ</th>
+                            <th class="py-2 text-center">ครั้งที่</th>
+                            <th class="py-2 text-right">สถานะ</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${records.map(r => `
+                        <tr class="border-b border-gray-100">
+                            <td class="py-3 font-semibold text-gray-700">${r.date}</td>
+                            <td class="py-3 font-mono text-gray-600">${r.time}</td>
+                             <td class="py-3">
+                                <span class="px-2 py-1 rounded text-xs font-bold ${r.type.includes('Real') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+                                ${r.type}
+                                </span>
+                             </td>
+                            <td class="py-3 text-gray-600">${r.reason}</td>
+                            <td class="py-3 text-center font-bold text-gray-800">${r.count}</td>
+                            <td class="py-3 text-right">
+                                <span class="${getStatusColor(r.status)} font-medium">${r.status}</span>
+                            </td>
+                        </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                 ${records.length === 0 ? '<p class="text-center text-gray-400 py-8">No records found.</p>' : ''}
+            </div>
+
+             <div class="mt-8 pt-4 border-t-2 border-dashed border-gray-200 flex justify-between items-center bg-gray-50 p-4 rounded-lg">
+                <span class="text-lg font-bold text-gray-600">Total Late this Month:</span>
+                <span class="text-3xl font-bold text-blue-600">${report.totalLate}</span>
+            </div>
+        </div>
+     `;
+        }
+
+        function getStatusColor(status) {
+            if (status === 'Approved') return 'text-green-600';
+            if (status === 'Rejected') return 'text-red-600';
+            if (status === 'Pending') return 'text-yellow-600';
+            return 'text-gray-500';
+        }
     </script>
 </body>
 
