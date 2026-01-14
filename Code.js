@@ -107,7 +107,8 @@ function setupSheets() {
     'Tidiness': ['ID', 'Date', 'WeekOfYear', 'StudentID', 'StudentName', 'Class', 'Hair', 'Nails', 'Uniform', 'Bag', 'RecordedBy'],
     'Students': ['StudentID', 'FullName', 'Class', 'Gender', 'Status', 'ParentPhone'],
     'Config': ['Key', 'Value', 'Description'],
-    'Bonus_Eligibility': ['StudentID', 'Month_Year', 'Is_Eligible', 'Disqualification_Reason', 'Last_Updated']
+    'Bonus_Eligibility': ['StudentID', 'Month_Year', 'Is_Eligible', 'Disqualification_Reason', 'Last_Updated'],
+    'Behaviour_Scores': ['StudentID', 'StudentName', 'Class', 'Term', 'AcademicYear', 'Score', 'LastUpdated']
   };
 
   for (var sheetName in sheetsToSetup) {
@@ -1028,6 +1029,123 @@ function applyCDRRules(record) {
   };
 }
 
+/**
+ * Updates or creates the student's behaviour score for the current term.
+ * Calculates: BaseScore (100) - Sum(Deductions for this term)
+ * @param {string} studentId - The student's ID
+ * @param {string} studentName - The student's name
+ * @param {string} studentClass - The student's class
+ */
+function updateBehaviourScore(studentId, studentName, studentClass) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var cdrSheet = ss.getSheetByName('CDR_Log');
+    var configSheet = ss.getSheetByName('Config');
+    var scoreSheet = ss.getSheetByName('Behaviour_Scores');
+
+    if (!cdrSheet || !configSheet || !scoreSheet) {
+      Logger.log('updateBehaviourScore: Missing required sheets');
+      return;
+    }
+
+    // 1. Get Config for Term Detection
+    var configData = configSheet.getDataRange().getValues();
+    var termConfig = {};
+    for (var k = 1; k < configData.length; k++) {
+      termConfig[configData[k][0]] = configData[k][1];
+    }
+    var academicYear = termConfig['AcademicYear'] || String(new Date().getFullYear());
+
+    // 2. Determine Current Term
+    function parseConfigDate(value) {
+      if (!value) return null;
+      if (value instanceof Date) return value;
+      return new Date(value + '-01');
+    }
+
+    var s1Start = parseConfigDate(termConfig['Semester1Start']);
+    var s1End = parseConfigDate(termConfig['Semester1End']);
+    if (s1End) { s1End = new Date(s1End.getFullYear(), s1End.getMonth() + 1, 0); }
+
+    var s2Start = parseConfigDate(termConfig['Semester2Start']);
+    var s2End = parseConfigDate(termConfig['Semester2End']);
+    if (s2End) { s2End = new Date(s2End.getFullYear(), s2End.getMonth() + 1, 0); }
+
+    var now = new Date();
+    var currentTerm = '1'; // Default to Term 1
+    var startDate, endDate;
+
+    if (s1Start && s1End && now >= s1Start && now <= s1End) {
+      currentTerm = '1';
+      startDate = s1Start;
+      endDate = s1End;
+    } else if (s2Start && s2End && now >= s2Start && now <= s2End) {
+      currentTerm = '2';
+      startDate = s2Start;
+      endDate = s2End;
+    } else {
+      // Fallback: Use current calendar year
+      startDate = new Date(now.getFullYear(), 0, 1);
+      endDate = new Date(now.getFullYear(), 11, 31);
+    }
+
+    // 3. Calculate Total Deductions for this Student in this Term
+    var cdrData = cdrSheet.getDataRange().getValues();
+    var totalDeduction = 0;
+
+    // CDR_Log columns: ID(0), Date(1), StudentID(2), ..., Deduction(15)
+    for (var i = 1; i < cdrData.length; i++) {
+      var rowStudentId = String(cdrData[i][2]).trim();
+      var rowDate = new Date(cdrData[i][1]);
+      var rowDeduction = Number(cdrData[i][15]) || 0;
+
+      if (rowStudentId === String(studentId).trim()) {
+        // Check if within term date range
+        if (rowDate >= startDate && rowDate <= endDate) {
+          totalDeduction += rowDeduction;
+        }
+      }
+    }
+
+    // 4. Calculate Final Score (Base 100 - Deductions, min 0)
+    var baseScore = 100;
+    var finalScore = Math.max(0, baseScore - totalDeduction);
+
+    // 5. Upsert into Behaviour_Scores
+    // Search for existing row with same StudentID + Term + AcademicYear
+    var scoreData = scoreSheet.getDataRange().getValues();
+    var existingRowIndex = -1;
+
+    for (var j = 1; j < scoreData.length; j++) {
+      var existingStudentId = String(scoreData[j][0]).trim();
+      var existingTerm = String(scoreData[j][3]).trim();
+      var existingYear = String(scoreData[j][4]).trim();
+
+      if (existingStudentId === String(studentId).trim() &&
+        existingTerm === currentTerm &&
+        existingYear === academicYear) {
+        existingRowIndex = j + 1; // 1-based for Sheets API
+        break;
+      }
+    }
+
+    var rowData = [studentId, studentName || '', studentClass || '', currentTerm, academicYear, finalScore, new Date()];
+
+    if (existingRowIndex > 0) {
+      // Update existing row
+      scoreSheet.getRange(existingRowIndex, 1, 1, 7).setValues([rowData]);
+    } else {
+      // Append new row
+      scoreSheet.appendRow(rowData);
+    }
+
+    Logger.log('updateBehaviourScore: Updated score for ' + studentId + ' to ' + finalScore);
+
+  } catch (e) {
+    Logger.log('updateBehaviourScore Error: ' + e.toString());
+  }
+}
+
 function saveCDRRecord(record) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var cdrSheet = ss.getSheetByName('CDR_Log');
@@ -1079,6 +1197,11 @@ function saveCDRRecord(record) {
   }
   // -----------------------------------------------
 
+  // --- Update Behaviour Score Cache ---
+  try {
+    updateBehaviourScore(record.studentId, record.studentName, record.class);
+  } catch (e) { Logger.log('Score update failed: ' + e); }
+
   return { success: true, message: 'CDR record saved successfully', id: id, punishment: rules.punishment, offenseCount: rules.offenseCount, deduction: rules.deduction };
 }
 
@@ -1114,7 +1237,18 @@ function deleteCDRRecord(id) {
   var data = cdrSheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === id) {
+      // Capture student info before deleting
+      var studentId = String(data[i][2]);
+      var studentName = String(data[i][3]);
+      var studentClass = String(data[i][4]);
+
       cdrSheet.deleteRow(i + 1);
+
+      // Recalculate score after deletion
+      try {
+        updateBehaviourScore(studentId, studentName, studentClass);
+      } catch (e) { Logger.log('Score recalc failed: ' + e); }
+
       return { success: true, message: 'CDR record deleted successfully' };
     }
   }
@@ -1570,6 +1704,7 @@ function createCDRFromLateness(latenessId, studentId, studentName, studentClass,
     // 6. Trigger Immediate Bonus Disqualification AND Level 2 Email
     try {
       updateBonusEligibility(studentId, new Date());
+      updateBehaviourScore(studentId, studentName, studentClass);
 
       // If escalated to Level 2, we should probably trigger the email too using the helper
       if (targetLevel === 'Level 2') {
