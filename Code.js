@@ -1286,6 +1286,7 @@ function getMonthlyLatenessCount(studentId) {
 }
 
 // --- LATENESS LOGIC (Aligned with Report) ---
+// Normalized to handle: 'Activity Late', '7:40' (legacy string), Date objects (Sheets auto-format)
 function getMonthlyActivityLateCount(studentId) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Lateness_Log');
@@ -1296,18 +1297,36 @@ function getMonthlyActivityLateCount(studentId) {
   var now = new Date();
   var currentMonth = now.getMonth();
   var currentYear = now.getFullYear();
+  var scriptTimeZone = Session.getScriptTimeZone();
 
   // Schema: ID(0), Date(1), Time(2), StudentID(3)... RecordType(8)
   for (var i = 1; i < data.length; i++) {
     var rowDate = new Date(data[i][1]);
     var rowId = String(data[i][3]).trim();
-    var rowType = String(data[i][8]); // 'Activity Late' or 'Real Late'
+
+    // --- NORMALIZE RecordType ---
+    var rawType = data[i][8];
+    var cleanType;
+
+    if (rawType instanceof Date) {
+      // Google Sheets auto-formatted "7:40" into a Date object (e.g., 1899-12-30T07:40:00)
+      cleanType = Utilities.formatDate(rawType, scriptTimeZone, 'H:mm'); // Output: "7:40"
+    } else {
+      cleanType = String(rawType).trim();
+    }
+
+    // Normalize leading zeros (07:40 -> 7:40)
+    if (cleanType === '07:40') cleanType = '7:40';
+    if (cleanType === '08:00') cleanType = '8:00';
+
+    // Activity Late Detection (matches 'Activity Late' or legacy '7:40')
+    var isActivityLate = (cleanType === 'Activity Late' || cleanType === '7:40');
 
     // Match Student, Month, Year, and Type='Activity Late'
     if (rowId === String(studentId).trim() &&
       rowDate.getMonth() === currentMonth &&
       rowDate.getFullYear() === currentYear &&
-      (rowType === 'Activity Late' || rowType === '7:40')) {
+      isActivityLate) {
       count++;
     }
   }
@@ -3356,4 +3375,59 @@ function getStudentLatenessReport(studentId, monthStr) {
   } catch (e) {
     return { success: false, message: e.toString() };
   }
+}
+
+// --- TEST FUNCTION: Verify Lateness Counting Logic ---
+// Run this manually in Apps Script Editor to test the fix.
+// Expected Result: count = 3 (1x 'Activity Late', 1x '7:40' string, 1x Date object)
+function testLatenessCounting() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Lateness_Log');
+  var testId = 'TEST_' + new Date().getTime();
+  var today = new Date();
+  var scriptTimeZone = Session.getScriptTimeZone();
+  var todayStr = Utilities.formatDate(today, scriptTimeZone, 'yyyy-MM-dd');
+
+  // --- Insert 3 Mock Records with Different RecordType Formats ---
+
+  // Record 1: "Activity Late" (New Standard)
+  sheet.appendRow([
+    'TEST1_' + testId, todayStr, '07:35:00', testId, 'Test Student', 'TestClass',
+    'Test Reason', 'Tester', 'Activity Late', 'Pending', 1, '', '', '', '', '', '', ''
+  ]);
+
+  // Record 2: "7:40" (Legacy String from Rapid Entry)
+  sheet.appendRow([
+    'TEST2_' + testId, todayStr, '07:38:00', testId, 'Test Student', 'TestClass',
+    'Test Reason', 'Tester', '7:40', 'Pending', 1, '', '', '', '', '', '', ''
+  ]);
+
+  // Record 3: Date Object (Simulating Sheets auto-format of "7:40")
+  // Note: Appending a native JS Date will become a Date serial in Sheets
+  var dateFor740 = new Date(1899, 11, 30, 7, 40, 0);
+  sheet.appendRow([
+    'TEST3_' + testId, todayStr, '07:39:00', testId, 'Test Student', 'TestClass',
+    'Test Reason', 'Tester', dateFor740, 'Pending', 1, '', '', '', '', '', '', ''
+  ]);
+
+  // --- Run the Count Function ---
+  var count = getMonthlyActivityLateCount(testId);
+
+  // --- Assert & Log Result ---
+  Logger.log('=== TEST RESULT ===');
+  Logger.log('Test ID: ' + testId);
+  Logger.log('Expected Count: 3');
+  Logger.log('Actual Count: ' + count);
+  Logger.log('Status: ' + (count === 3 ? '✅ PASS' : '❌ FAIL'));
+
+  // --- Cleanup: Delete Test Rows ---
+  var data = sheet.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][3]) === testId) {
+      sheet.deleteRow(i + 1);
+    }
+  }
+  Logger.log('Test rows cleaned up.');
+
+  return count === 3 ? 'PASS' : 'FAIL';
 }

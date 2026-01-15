@@ -2109,13 +2109,13 @@
                 </div>
 
                 <div class="grid grid-cols-2 gap-4 mt-6">
-                    <button onclick="submitRapidEntry('7:40')" class="flex flex-col items-center justify-center p-4 bg-yellow-100 border-2 border-yellow-400 text-yellow-800 rounded-xl hover:bg-yellow-200 active:scale-95 transition-all shadow-sm">
+                    <button onclick="submitRapidEntry('Activity Late')" class="flex flex-col items-center justify-center p-4 bg-yellow-100 border-2 border-yellow-400 text-yellow-800 rounded-xl hover:bg-yellow-200 active:scale-95 transition-all shadow-sm">
                         <span class="text-2xl mb-1">⏰</span>
                         <span class="font-bold text-lg">Late 7:40</span>
                         <span class="text-xs opacity-75">Activity Late</span>
                     </button>
 
-                    <button onclick="submitRapidEntry('8:00')" class="flex flex-col items-center justify-center p-4 bg-red-100 border-2 border-red-400 text-red-800 rounded-xl hover:bg-red-200 active:scale-95 transition-all shadow-sm">
+                    <button onclick="submitRapidEntry('Real Late')" class="flex flex-col items-center justify-center p-4 bg-red-100 border-2 border-red-400 text-red-800 rounded-xl hover:bg-red-200 active:scale-95 transition-all shadow-sm">
                         <span class="text-2xl mb-1">🚨</span>
                         <span class="font-bold text-lg">Late 8:00+</span>
                         <span class="text-xs opacity-75">Real Late</span>
@@ -5078,6 +5078,7 @@
                             <th class="py-3 px-2 text-left w-24">วันที่ (Date)</th>
                             <th class="py-3 px-2 text-left w-20">เวลา (Time)</th>
                             <th class="py-3 px-2 text-left text-gray-800">ชื่อ (Name)</th>
+                            <th class="py-3 px-2 text-left w-24">ประเภท (Type)</th>
                             <th class="py-3 px-2 text-left w-32">สาเหตุ (Reason)</th>
                             <th class="py-3 px-2 text-center w-20">จำนวนครั้ง (Count)</th>
                             <th class="py-3 px-2 text-center w-28">สถานะ (Status)</th>
@@ -5089,6 +5090,11 @@
                             <td class="py-2 px-2">${r.date}</td>
                             <td class="py-2 px-2 font-mono text-gray-600">${r.time}</td>
                             <td class="py-2 px-2 font-semibold text-gray-800">${r.studentName}</td>
+                            <td class="py-2 px-2">
+                                <span class="px-2 py-0.5 rounded text-xs font-bold ${(r.type || '').includes('Real') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+                                    ${r.type || '-'}
+                                </span>
+                            </td>
                             <td class="py-2 px-2 text-gray-600 truncate max-w-[150px]">${r.reason}</td>
                             <td class="py-2 px-2 text-center">
                                 <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold ${r.count > 2 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}">
