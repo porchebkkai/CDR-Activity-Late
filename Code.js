@@ -86,6 +86,135 @@ const PUNISHMENT_MATRIX = {
 function getOffenseCategories() {
   return OFFENSE_CATEGORIES;
 }
+
+// --- SHARED CONSTANTS ---
+const OFFENSE_LEVELS = { LEVEL_1: 'Level 1', LEVEL_2: 'Level 2' };
+const GRADE_GROUPS   = { G_1_5: 'G_1_5',     G_6_12: 'G_6_12' };
+const LATENESS_TYPES = { REAL_LATE: 'Real Late', ACTIVITY_LATE: 'Activity Late' };
+// Canonical status values for Lateness_Log.Status
+const LATENESS_STATUSES = { PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected', CONVERTED: 'Converted', PROCESSED: 'Processed' };
+const CDR_STATUSES = { ACTIVE: 'Active', RESOLVED: 'Resolved' };
+// Admin-level roles that see all records across all classes
+const ADMIN_ROLES = ['Superadmin', 'VP', 'DisciplineDept'];
+// ------------------------------
+
+// --- SHARED UTILITIES ---
+
+/**
+ * Safely parses any value to a Date. Returns null on invalid input instead of
+ * an Invalid Date object, preventing silent comparison failures.
+ */
+function parseSafeDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  // Handle YYYY-MM config strings (append day so they parse as local time)
+  if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) {
+    value = value + '-01';
+  }
+  var d = new Date(value);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Returns a 'yyyy-MM' string for the given date, using the script timezone.
+ * Single source of truth for month-year keys used across all filter functions.
+ */
+function getMonthYearKey(date, tz) {
+  var d = (date instanceof Date) ? date : parseSafeDate(date);
+  if (!d) return null;
+  return Utilities.formatDate(d, tz || Session.getScriptTimeZone(), 'yyyy-MM');
+}
+
+/**
+ * Searches a 2-D sheet values array (from getValues()) for the row whose
+ * column-0 value matches studentId. Returns the matched row array or null.
+ */
+function findStudentRow(studentId, data) {
+  var sid = String(studentId).trim();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === sid) return data[i];
+  }
+  return null;
+}
+
+/**
+ * Returns true when the given userRole is allowed to see records for
+ * recordClass, given the user's assignedClasses string ('ALL' or CSV).
+ */
+function canAccessClass(userRole, assignedClasses, recordClass) {
+  if (ADMIN_ROLES.indexOf(userRole) !== -1) return true;
+  if (String(assignedClasses).toUpperCase() === 'ALL') return true;
+  var classes = String(assignedClasses || '').split(',').map(function (c) { return c.trim(); });
+  return classes.indexOf(String(recordClass).trim()) !== -1;
+}
+
+/**
+ * Calculates the active term window from termConfig (keys: Semester1Start,
+ * Semester1End, Semester2Start, Semester2End, each 'YYYY-MM').
+ * Returns { startDate, endDate, term } — term is 1, 2, or 0 (fallback).
+ */
+function getCurrentTerm(termConfig) {
+  var s1Start = parseSafeDate(termConfig['Semester1Start']);
+  var s1End   = parseSafeDate(termConfig['Semester1End']);
+  if (s1End) s1End = new Date(s1End.getFullYear(), s1End.getMonth() + 1, 0);
+
+  var s2Start = parseSafeDate(termConfig['Semester2Start']);
+  var s2End   = parseSafeDate(termConfig['Semester2End']);
+  if (s2End) s2End = new Date(s2End.getFullYear(), s2End.getMonth() + 1, 0);
+
+  var now = new Date();
+  if (s1Start && s1End && now >= s1Start && now <= s1End) {
+    return { startDate: s1Start, endDate: s1End, term: 1 };
+  }
+  if (s2Start && s2End && now >= s2Start && now <= s2End) {
+    return { startDate: s2Start, endDate: s2End, term: 2 };
+  }
+  return { startDate: new Date(now.getFullYear(), 0, 1), endDate: new Date(now.getFullYear(), 11, 31), term: 0 };
+}
+
+/**
+ * Reads and returns termConfig as a plain object from the Config sheet.
+ * Centralised so callers don't each re-scan the sheet.
+ */
+function getTermConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configSheet = ss.getSheetByName('Config');
+  if (!configSheet) return {};
+  var data = configSheet.getDataRange().getValues();
+  var cfg = {};
+  for (var i = 1; i < data.length; i++) cfg[data[i][0]] = data[i][1];
+  return cfg;
+}
+
+/**
+ * ONE-TIME MIGRATION — run once from the Apps Script editor after deployment.
+ * Normalises legacy status values in Lateness_Log that were written before
+ * the Phase 4 status-enum refactor:
+ *   Accepted       → Approved
+ *   Closed         → Rejected
+ *   ConvertedToCDR → Converted
+ * Safe to run multiple times (skips already-normalised rows).
+ */
+function migrateLatnessStatuses() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Lateness_Log');
+  if (!sheet) { Logger.log('Lateness_Log sheet not found'); return; }
+
+  var data = sheet.getDataRange().getValues();
+  var statusCol = 10; // Column J (1-based) — Status field
+  var map = { 'Accepted': 'Approved', 'Closed': 'Rejected', 'ConvertedToCDR': 'Converted' };
+  var changed = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var current = String(data[i][statusCol - 1]).trim();
+    if (map[current]) {
+      sheet.getRange(i + 1, statusCol).setValue(map[current]);
+      changed++;
+    }
+  }
+  Logger.log('migrateLatnessStatuses: updated ' + changed + ' row(s).');
+  return 'Done — ' + changed + ' row(s) updated.';
+}
 // ------------------------------
 
 // --- PHASE 1: SETUP & CONFIGURATION (v2.3) ---
@@ -395,38 +524,89 @@ function deleteStudentAdmin(studentId) {
 
 // --- AUTHENTICATION & SECURITY ---
 
+// --- PIN Rate-Limiting Helpers ---
+
+function getPinAttempts() {
+  var config = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+  if (!config) return {};
+  var data = config.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === 'PinAttempts') {
+      try { return JSON.parse(data[i][1]) || {}; } catch (e) { return {}; }
+    }
+  }
+  return {};
+}
+
+function savePinAttempts(attempts) {
+  var config = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+  if (!config) return;
+  var data = config.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === 'PinAttempts') {
+      config.getRange(i + 1, 2).setValue(JSON.stringify(attempts));
+      return;
+    }
+  }
+  config.appendRow(['PinAttempts', JSON.stringify(attempts), 'PIN brute-force protection counters']);
+}
+
 /**
- * Authenticates a user via a 4-digit PIN.
+ * Authenticates a user via PIN.
+ * Locks a PIN for 15 minutes after 5 consecutive failed attempts.
  * Checks Column I (Index 8) of the Users sheet.
- * [cite: 1]
  */
 function authenticateByPIN(pin) {
+  var pinKey = String(pin).trim();
+  var now = new Date().getTime();
+
+  // --- RATE LIMIT CHECK ---
+  var attempts = getPinAttempts();
+  var entry = attempts[pinKey] || { count: 0, lockedUntil: null };
+
+  if (entry.lockedUntil && now < entry.lockedUntil) {
+    var minutesLeft = Math.ceil((entry.lockedUntil - now) / 60000);
+    return { success: false, locked: true, message: 'PIN ถูกล็อก กรุณารอ ' + minutesLeft + ' นาที (Locked — try again in ' + minutesLeft + ' min)' };
+  }
+  // -----------------------
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const userSheet = ss.getSheetByName('Users');
-  const data = userSheet.getDataRange().getValues(); // Headers are row 0
+  const data = userSheet.getDataRange().getValues();
 
   // Structure: [Username, Password, FullName, Role, AssignedClasses, Email, Status, LastLogin, PIN]
-  // Indices:   [0,        1,        2,        3,    4,               5,     6,      7,         8]
-
-  // Find the user (Skip header i=1)
   for (let i = 1; i < data.length; i++) {
-    // Ensure both are strings for comparison
-    if (String(data[i][8]).trim() === String(pin).trim() && data[i][6] === 'Active') {
+    if (String(data[i][8]).trim() === pinKey && data[i][6] === 'Active') {
+      // SUCCESS — clear any existing counter for this PIN
+      delete attempts[pinKey];
+      savePinAttempts(attempts);
 
-      // Return minimal session object
       return {
         success: true,
         user: {
-          fullName: data[i][2], // FIX: Changed from [1] (Password) to [2] (FullName)
+          fullName: data[i][2],
           role: data[i][3],
-          username: data[i][0], // FIX: Changed from [1] (Password) to [0] (Username)
+          username: data[i][0],
           authMethod: 'PIN'
         }
       };
     }
   }
 
-  return { success: false, message: 'Invalid PIN' };
+  // FAILURE — increment counter
+  entry.count = (entry.count || 0) + 1;
+  if (entry.count >= 5) {
+    entry.lockedUntil = now + (15 * 60 * 1000); // lock for 15 minutes
+    entry.count = 0;
+    attempts[pinKey] = entry;
+    savePinAttempts(attempts);
+    return { success: false, locked: true, message: 'PIN ถูกล็อก 15 นาที (Locked for 15 min — too many attempts)' };
+  }
+
+  attempts[pinKey] = entry;
+  savePinAttempts(attempts);
+  var remaining = 5 - entry.count;
+  return { success: false, message: 'PIN ไม่ถูกต้อง (Invalid PIN — ' + remaining + ' attempt' + (remaining === 1 ? '' : 's') + ' left)' };
 }
 
 /**
@@ -527,7 +707,7 @@ function getUnverifiedRecords(teacherClass) {
     // We specifically want 'Real Late' records (or any Pending record that needs verification)
     // The prompt explicitly mentions ensuring we grab 'Real Late'. 
     // We filter for Status='Pending' AND (Class Match).
-    if (rowStatus === 'Pending' && matchClass) {
+    if (rowStatus === LATENESS_STATUSES.PENDING && matchClass) {
       results.push({
         id: data[i][0],      // ID for robust verification
         timestamp: data[i][1], // Date
@@ -646,24 +826,8 @@ function getCDRRecords(param1, param2) {
 
       // --- FILTER LOGIC ---
 
-      // A. Role-Based Access (Who can see what?)
-      if (rowRole === 'Superadmin' || rowRole === 'VP' || rowRole === 'DisciplineDept') {
-        includeRecord = true; // Can see everything
-      } else if (rowRole === 'HRT' || rowRole === 'Teacher') {
-        // Can only see their assigned classes
-        // If assignedClasses is 'ALL', allow it. Otherwise check list.
-        if (filter.assignedClasses === 'ALL') {
-          includeRecord = true;
-        } else if (targetClassIds.indexOf(rowClass) !== -1) {
-          includeRecord = true;
-        }
-      } else if (rowRole === 'Student') {
-        // Students see only their own ID (assumed handled by calling logic, but checking here too)
-        // Note: Usually students use getDashboardStats, but if they access this:
-        // You might want to pass studentId in filter if supporting student view here.
-        // For now, defaulting to false if logic not defined, or true if lenient.
-        includeRecord = false;
-      }
+      // A. Role-Based Access — delegates to canAccessClass() shared utility
+      var includeRecord = canAccessClass(rowRole, filter.assignedClasses || '', rowClass);
 
       // If Access Denied, skip immediately
       if (!includeRecord) continue;
@@ -780,51 +944,23 @@ function countLevelOffenses(studentId, level, termConfig) {
   var cdrSheet = ss.getSheetByName('CDR_Log');
   if (!cdrSheet) return 0;
 
-  // Helper to parse dates (Replicated from applyCDRRules for standalone usage)
-  function parseConfigDate(value) {
-    if (!value) return null;
-    if (value instanceof Date) return value;
-    return new Date(value + '-01');
-  }
-
-  // Determine Date Range
-  var s1Start = parseConfigDate(termConfig['Semester1Start']);
-  var s1End = parseConfigDate(termConfig['Semester1End']);
-  if (s1End) { s1End = new Date(s1End.getFullYear(), s1End.getMonth() + 1, 0); }
-
-  var s2Start = parseConfigDate(termConfig['Semester2Start']);
-  var s2End = parseConfigDate(termConfig['Semester2End']);
-  if (s2End) { s2End = new Date(s2End.getFullYear(), s2End.getMonth() + 1, 0); }
-
-  var now = new Date();
-  var startDate, endDate;
-
-  if (s1Start && s1End && now >= s1Start && now <= s1End) {
-    startDate = s1Start;
-    endDate = s1End;
-  } else if (s2Start && s2End && now >= s2Start && now <= s2End) {
-    startDate = s2Start;
-    endDate = s2End;
-  } else {
-    // Fallback: Current Year
-    startDate = new Date(now.getFullYear(), 0, 1);
-    endDate = new Date(now.getFullYear(), 11, 31);
-  }
+  // Determine Date Range using shared getCurrentTerm utility
+  var termWindow = getCurrentTerm(termConfig);
+  var startDate = termWindow.startDate;
+  var endDate   = termWindow.endDate;
 
   var data = cdrSheet.getDataRange().getValues();
   var count = 0;
 
+  var sid = String(studentId).trim();
+  var lvl = String(level).trim();
   for (var i = 1; i < data.length; i++) {
-    var rowDate = new Date(data[i][1]);
+    var rowDate = parseSafeDate(data[i][1]);
+    if (!rowDate) continue;
     var rowStudentId = String(data[i][2]).trim();
     var rowLevel = String(data[i][5]).trim();
-
-    // Match Student AND Level
-    if (rowStudentId === String(studentId).trim() && rowLevel === String(level).trim()) {
-      // Match Date Range (Term)
-      if (rowDate >= startDate && rowDate <= endDate) {
-        count++;
-      }
+    if (rowStudentId === sid && rowLevel === lvl && rowDate >= startDate && rowDate <= endDate) {
+      count++;
     }
   }
   return count;
@@ -880,70 +1016,26 @@ function getGradeGroup(classStr) {
 function applyCDRRules(record) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var cdrSheet = ss.getSheetByName('CDR_Log');
-  var configSheet = ss.getSheetByName('Config');
 
-  if (!cdrSheet || !configSheet) {
+  if (!cdrSheet) {
     return { offenseCount: 1, punishment: 'ไม่สามารถคำนวณบทลงโทษได้ (Missing Sheets)', deduction: 0 };
   }
 
-  // 1. Fetch Term Configuration FIRST (Needed for Escalation Logic)
-  var configData = configSheet.getDataRange().getValues();
-  var termConfig = {};
-  for (var k = 1; k < configData.length; k++) {
-    termConfig[configData[k][0]] = configData[k][1];
-  }
+  // 1. Fetch Term Configuration via shared utility
+  var termConfig = getTermConfig();
 
-  // --- ESCALATION LOGIC (NEW: v2.3 Fix) ---
+  // --- ESCALATION LOGIC ---
   // If Incoming Level 1, Check for Auto-Escalation to Level 2
-  if (record.level === 'Level 1') {
-    // Count EXISTING Level 1 offenses for this term
-    var l1Count = countLevelOffenses(record.studentId, 'Level 1', termConfig);
-
-    // If student has 8 or more Level 1 offenses already, this new one (9th+) becomes Level 2
+  if (record.level === OFFENSE_LEVELS.LEVEL_1) {
+    var l1Count = countLevelOffenses(record.studentId, OFFENSE_LEVELS.LEVEL_1, termConfig);
     if (l1Count >= 8) {
-      record.level = 'Level 2';
-      // Proceed to calculate punishment as if it were a Level 2 offense
+      record.level = OFFENSE_LEVELS.LEVEL_2;
     }
   }
   // ----------------------------------------
 
   // 2. Determine Grade Group
   var gradeGroup = getGradeGroup(record.class);
-
-  // Helper to parse "YYYY-MM" or Date objects from Config
-  function parseConfigDate(value) {
-    if (!value) return null;
-    if (value instanceof Date) return value;
-    // Assume YYYY-MM format, default to 1st of month
-    return new Date(value + '-01');
-  }
-
-  var s1Start = parseConfigDate(termConfig['Semester1Start']);
-  var s1End = parseConfigDate(termConfig['Semester1End']);
-  // Adjust end date to last day of month if needed, or simple comparison
-  if (s1End) { s1End = new Date(s1End.getFullYear(), s1End.getMonth() + 1, 0); }
-
-  var s2Start = parseConfigDate(termConfig['Semester2Start']);
-  var s2End = parseConfigDate(termConfig['Semester2End']);
-  if (s2End) { s2End = new Date(s2End.getFullYear(), s2End.getMonth() + 1, 0); }
-
-  // 3. Determine Date Range for "Current Term"
-  // Uses the record's date (or today) to find which term window applies
-  var actionDate = record.date ? new Date(record.date) : new Date();
-  var startDate, endDate;
-
-  if (s1Start && s1End && actionDate >= s1Start && actionDate <= s1End) {
-    startDate = s1Start;
-    endDate = s1End;
-  } else if (s2Start && s2End && actionDate >= s2Start && actionDate <= s2End) {
-    startDate = s2Start;
-    endDate = s2End;
-  } else {
-    // Fallback: If outside defined terms (e.g. summer), count only purely within current calendar year or strict mode?
-    // STRICT MODE: If not in a term, start count at 0 (or just count today)
-    startDate = new Date(actionDate.getFullYear(), 0, 1); // Fallback to Jan 1st current year
-    endDate = new Date(actionDate.getFullYear(), 11, 31);
-  }
 
   // 4. Count Historical Offenses (Term-Aware Filter)
   // Use Helper Function for consistent counting
@@ -1387,7 +1479,7 @@ function saveLatenessRecord(record) {
       record.reason || '',                        // Reason
       record.recordedBy || '',                    // RecordedBy
       record.recordType || '',                    // RecordType
-      record.status || 'Pending',                 // Status
+      record.status || LATENESS_STATUSES.PENDING,  // Status
       strikeCount,                                // StrikeCount
       '', '', '', '', '', '', ''                  // Placeholders for review columns
     ]);
@@ -1466,7 +1558,7 @@ function filterLatenessRecords(filter, includeDebug) {
       else classIds = [String(safeFilter.classIds)];
     }
 
-    var targetStatus = safeFilter.status || 'Pending';
+    var targetStatus = safeFilter.status || LATENESS_STATUSES.PENDING;
     var data = latenessSheet.getDataRange().getValues();
     var records = [];
     var scriptTimeZone = Session.getScriptTimeZone();
@@ -1488,7 +1580,7 @@ function filterLatenessRecords(filter, includeDebug) {
       if (!row[0]) continue;
 
       var rowClass = String(row[5] || '').trim();
-      var rowStatus = String(row[9] || 'Pending').trim();
+      var rowStatus = String(row[9] || LATENESS_STATUSES.PENDING).trim();
       var rowDate = row[1];
 
       // Filters
@@ -1573,7 +1665,7 @@ function getLatenessSummaryForHRT(filter) {
 function getPendingLateness(classIds) {
   var filter = {
     classIds: classIds,
-    status: 'Pending'
+    status: LATENESS_STATUSES.PENDING
   };
   return filterLatenessRecords(filter, false);
 }
@@ -1593,7 +1685,7 @@ function approveLateness(id, isAcceptable) {
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][0]).trim() === String(id).trim()) {
         // Update status and review information
-        var newStatus = isAcceptable ? 'Accepted' : 'Closed';
+        var newStatus = isAcceptable ? LATENESS_STATUSES.APPROVED : LATENESS_STATUSES.REJECTED;
         var reviewedBy = Session.getActiveUser().getEmail() || 'HRT';
         var reviewedAt = new Date();
 
@@ -1628,15 +1720,10 @@ function createCDRFromLateness(latenessId, studentId, studentName, studentClass,
     }
 
     // 1. Fetch Term Configuration (Needed for Counting)
-    var configSheet = ss.getSheetByName('Config');
-    var configData = configSheet.getDataRange().getValues();
-    var termConfig = {};
-    for (var k = 1; k < configData.length; k++) {
-      termConfig[configData[k][0]] = configData[k][1];
-    }
+    var termConfig = getTermConfig();
 
     // 2. Check Level 1 Offense Count (Existing)
-    var l1Count = countLevelOffenses(studentId, 'Level 1', termConfig);
+    var l1Count = countLevelOffenses(studentId, OFFENSE_LEVELS.LEVEL_1, termConfig);
 
     // 3. Determine Level and Punishment Strategy
     var targetLevel = 'Level 1';
@@ -1712,7 +1799,7 @@ function createCDRFromLateness(latenessId, studentId, studentName, studentClass,
     var latenessData = latenessSheet.getDataRange().getValues();
     for (var i = 1; i < latenessData.length; i++) {
       if (String(latenessData[i][0]).trim() === String(latenessId).trim()) {
-        latenessSheet.getRange(i + 1, 10).setValue('ConvertedToCDR');
+        latenessSheet.getRange(i + 1, 10).setValue(LATENESS_STATUSES.CONVERTED);
         latenessSheet.getRange(i + 1, 12).setValue(createdBy || 'HRT');
         latenessSheet.getRange(i + 1, 13).setValue(new Date());
         latenessSheet.getRange(i + 1, 18).setValue(cdrId);
@@ -1842,7 +1929,7 @@ function logHrtAction(latenessId, action, notes, actedBy) {
     }
 
     // Update Lateness Log
-    latenessSheet.getRange(rowIndex + 1, 10).setValue('Processed'); // Status
+    latenessSheet.getRange(rowIndex + 1, 10).setValue(LATENESS_STATUSES.PROCESSED); // Status
     latenessSheet.getRange(rowIndex + 1, 11).setValue(monthlyStrikeCount); // StrikeCount
     latenessSheet.getRange(rowIndex + 1, 14).setValue(action); // Action taken
     latenessSheet.getRange(rowIndex + 1, 15).setValue(notes + ' | ' + responseMessage); // Notes

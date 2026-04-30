@@ -281,11 +281,54 @@
         </div>
     </div>
     <script>
+        // --- SHARED FRONTEND CONSTANTS ---
+        const THAI_MONTHS = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+
+        // Escapes user-supplied strings before inserting via innerHTML to prevent stored XSS.
+        // Use on any field that came from the backend and is not a system-generated ID or number.
+        function escapeHtml(str) {
+            return String(str == null ? '' : str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // Maps each role to the page keys it may access. Used by renderMenu and loadPage guards.
+        const PERMISSIONS = {
+            Superadmin:     ['dashboard','rapidEntry','cdr','pendingApprovals','reports','behaviorScores','userManagement','systemSettings','parentMeetings','myClassCDR','lateness','manageLateness','attendance','tidiness'],
+            VP:             ['dashboard','rapidEntry','cdr','pendingApprovals','reports','behaviorScores','parentMeetings'],
+            DisciplineDept: ['dashboard','rapidEntry','cdr','pendingApprovals','reports','behaviorScores'],
+            HRT:            ['dashboard','myClassCDR','lateness','manageLateness','attendance','tidiness','reports','behaviorScores'],
+            OnDutyTeacher:  ['dashboard','rapidEntry','lateness'],
+            OfficeStaff:    ['dashboard','rapidEntry','lateness','parentMeetings'],
+            Student:        ['dashboard'],
+        };
+
+        /**
+         * Wraps google.script.run in a Promise so all backend calls can use
+         * async/await instead of the nested withSuccessHandler/withFailureHandler pattern.
+         *
+         * Usage: const result = await callBackend('getFunctionName', arg1, arg2);
+         */
+        function callBackend(fnName, ...args) {
+            return new Promise((resolve, reject) => {
+                let runner = google.script.run
+                    .withSuccessHandler(resolve)
+                    .withFailureHandler(reject);
+                runner[fnName](...args);
+            });
+        }
+
+        // --- GLOBALS ---
         let currentUser = null;
         let currentLanguage = 'th';
         let currentReportData = null; // Store report data for PDF download
         // PROTECTED: Global cache for Rapid Entry performance
         let studentCache = {};
+        // Registry for active setInterval handles so they can be cleared on page change
+        let _activeIntervals = [];
 
         // Authenticate on page load
         window.addEventListener('DOMContentLoaded', function () {
@@ -482,17 +525,25 @@
 
             Swal.fire({ title: 'Verifying...', didOpen: () => Swal.showLoading() });
 
+            const pinToSubmit = currentKioskPin;
+            currentKioskPin = null; // Clear from memory immediately — never keep PIN around
             google.script.run.withSuccessHandler((res) => {
                 Swal.close();
                 if (res.success) {
-                    kioskUser = res.user; // Store session locally
-                    renderKioskStudentInput(); // Move to Step 2
+                    kioskUser = res.user;
+                    renderKioskStudentInput();
                 } else {
-                    Swal.fire({ icon: 'error', title: 'Invalid PIN', timer: 1500, showConfirmButton: false });
+                    const title = res.locked ? '🔒 PIN Locked' : 'Invalid PIN';
+                    const text  = res.locked ? res.message : res.message || 'Please try again';
+                    Swal.fire({ icon: 'error', title, text, timer: res.locked ? 5000 : 1800, showConfirmButton: false });
                     currentKioskPin = '';
                     updatePinDisplay();
                 }
-            }).authenticateByPIN(currentKioskPin);
+            }).withFailureHandler(() => {
+                Swal.close();
+                currentKioskPin = '';
+                updatePinDisplay();
+            }).authenticateByPIN(pinToSubmit);
         }
 
         // --- KIOSK STUDENT SELECTION LOGIC (Cascading) ---
@@ -509,7 +560,7 @@
             <div class="flex flex-col">
                 <span class="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Current Officer</span>
                 <span class="text-lg font-bold text-blue-700 flex items-center gap-1">
-                    👤 ${kioskUser.fullName}
+                    👤 ${escapeHtml(kioskUser.fullName)}
                 </span>
             </div>
             <button onclick="showLoginScreen()" class="text-xs text-red-500 hover:bg-red-50 px-3 py-1 rounded transition">Exit</button>
@@ -673,12 +724,12 @@
 
             card.innerHTML = `
         <div class="flex justify-between items-center mb-4 pb-2 border-b border-gray-100">
-            <div class="text-sm font-bold text-blue-600 truncate max-w-[150px]">👤 ${kioskUser.fullName}</div>
+            <div class="text-sm font-bold text-blue-600 truncate max-w-[150px]">👤 ${escapeHtml(kioskUser.fullName)}</div>
             <div class="text-xl font-mono font-bold text-gray-700 bg-gray-100 px-3 py-1 rounded-lg" id="kioskClock">--:--</div>
         </div>
 
         <div class="text-center mb-6">
-            <h3 class="text-2xl font-bold text-gray-800">${kioskStudent.name}</h3>
+            <h3 class="text-2xl font-bold text-gray-800">${escapeHtml(kioskStudent.name)}</h3>
             <span class="inline-block px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-mono mt-1 font-bold border border-blue-100">
                 ${kioskStudent.class} • ${kioskStudent.id}
             </span>
@@ -722,6 +773,7 @@
                 if (el) updateClock();
                 else clearInterval(clockInterval);
             }, 1000);
+            _activeIntervals.push(clockInterval);
         }
 
         function renderKioskLatenessConfirm(type) {
@@ -739,7 +791,7 @@
         </div>
 
         <div class="text-center mb-6">
-            <h3 class="text-xl font-bold text-gray-800">${kioskStudent.name}</h3>
+            <h3 class="text-xl font-bold text-gray-800">${escapeHtml(kioskStudent.name)}</h3>
             ${type === 'Real Late' ? '<p class="text-xs text-red-500 font-bold mt-1 bg-red-50 inline-block px-2 py-1 rounded">⚠️ Deducts Bonus + Auto-CDR Level 1</p>' : ''}
         </div>
 
@@ -773,6 +825,7 @@
                 if (el) updateConfirmClock();
                 else clearInterval(confirmClockInterval);
             }, 1000);
+            _activeIntervals.push(confirmClockInterval);
         }
 
         // Global cache for categories
@@ -1473,54 +1526,28 @@
 
 
         function getMenuItems() {
-            const role = currentUser.role;
-            const items = [];
+            const allowed = PERMISSIONS[currentUser.role] || ['dashboard'];
 
-            // --- RAPID ENTRY (On-Duty Teacher, Office Staff, Admins) ---
-            if (['OnDutyTeacher', 'OfficeStaff', 'Superadmin', 'VP', 'DisciplineDept'].includes(role)) {
-                items.push({ key: 'rapidEntry', icon: '⚡', page: 'rapidEntry' });
-            }
+            // Master catalog — single source of truth for all possible nav items, in display order.
+            // To add a new page: (1) add an entry here, (2) add its page key to PERMISSIONS above.
+            const catalog = [
+                { key: 'rapidEntry',       icon: '⚡',       page: 'rapidEntry' },
+                { key: 'dashboard',        icon: '📊',       page: 'dashboard' },
+                { key: 'cdrManagement',    icon: '📝',       page: 'cdr' },
+                { key: 'pendingApprovals', icon: '✅',       page: 'pendingApprovals' },
+                { key: 'myClassCDR',       icon: '📋',       page: 'myClassCDR' },
+                { key: 'latenessRecord',   icon: '⏰',       page: 'lateness' },
+                { key: 'manageLateness',   icon: '⏱️',      page: 'manageLateness' },
+                { key: 'attendance',       icon: '✅',       page: 'attendance' },
+                { key: 'tidiness',         icon: '👔',       page: 'tidiness' },
+                { key: 'parentMeetings',   icon: '👨‍👩‍👧', page: 'parentMeetings' },
+                { key: 'reports',          icon: '📈',       page: 'reports' },
+                { key: 'behaviorScores',   icon: '💯',       page: 'behaviorScores' },
+                { key: 'userManagement',   icon: '👥',       page: 'userManagement' },
+                { key: 'settings',         icon: '⚙️',      page: 'systemSettings' },
+            ];
 
-            items.push({ key: 'dashboard', icon: '📊', page: 'dashboard' });
-
-
-            // REMOVED: logCDR (HRTs/Teachers must use Kiosk Mode or Modal)
-
-
-            if (['Superadmin', 'VP', 'DisciplineDept'].includes(role)) {
-                items.push({ key: 'cdrManagement', icon: '📝', page: 'cdr' });
-                items.push({ key: 'pendingApprovals', icon: '✅', page: 'pendingApprovals' });
-            }
-
-            if (['HRT'].includes(role)) {
-                items.push({ key: 'myClassCDR', icon: '📋', page: 'myClassCDR' });
-            }
-
-            if (['HRT', 'OnDutyTeacher', 'OfficeStaff'].includes(role)) {
-                items.push({ key: 'latenessRecord', icon: '⏰', page: 'lateness' });
-            }
-
-            if (['HRT'].includes(role)) {
-                items.push({ key: 'manageLateness', icon: '⏱️', page: 'manageLateness' });
-                items.push({ key: 'attendance', icon: '✅', page: 'attendance' });
-                items.push({ key: 'tidiness', icon: '👔', page: 'tidiness' });
-            }
-
-            if (['OfficeStaff'].includes(role)) {
-                items.push({ key: 'parentMeetings', icon: '👨‍👩‍👧', page: 'parentMeetings' });
-            }
-
-            if (['Superadmin', 'VP', 'DisciplineDept', 'HRT'].includes(role)) {
-                items.push({ key: 'reports', icon: '📈', page: 'reports' });
-                items.push({ key: 'behaviorScores', icon: '💯', page: 'behaviorScores' });
-            }
-
-            if (['Superadmin'].includes(role)) {
-                items.push({ key: 'userManagement', icon: '👥', page: 'userManagement' });
-                items.push({ key: 'settings', icon: '⚙️', page: 'systemSettings' });
-            }
-
-            return items;
+            return catalog.filter(item => allowed.includes(item.page));
         }
 
 
@@ -1535,7 +1562,15 @@
             }
         });
 
+        // Clears all intervals registered via _activeIntervals. Call at the top of loadPage
+        // to prevent accumulating clock timers across page navigations.
+        function cleanupIntervals() {
+            _activeIntervals.forEach(id => clearInterval(id));
+            _activeIntervals = [];
+        }
+
         function loadPage(page) {
+            cleanupIntervals(); // Stop any running clock/poll intervals from the previous page
             window.currentPage = page; // Track current page for Refresh Logic
             const t = translations[currentLanguage];
             if (page === 'rapidEntry') {
@@ -1681,8 +1716,8 @@
                 ${realLateRecords.map(r => `
                     <div class="flex justify-between items-center p-3 border-b last:border-0 hover:bg-gray-50">
                         <div>
-                            <div class="font-bold text-gray-800">${r.studentName} <span class="text-gray-500 font-normal">(${r.class})</span></div>
-                            <div class="text-xs text-gray-500">${new Date(r.timestamp).toLocaleTimeString()} • ${r.type} • ${r.reason}</div>
+                            <div class="font-bold text-gray-800">${escapeHtml(r.studentName)} <span class="text-gray-500 font-normal">(${escapeHtml(r.class)})</span></div>
+                            <div class="text-xs text-gray-500">${new Date(r.timestamp).toLocaleTimeString()} • ${escapeHtml(r.type)} • ${escapeHtml(r.reason)}</div>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="verifyItem('${r.id}', 'Reject')" class="text-xs text-gray-500 hover:text-red-500 underline px-2">Skip/Restore</button>
@@ -2000,8 +2035,8 @@
                 ${records.map(r => `
                     <div class="flex justify-between items-center p-3 border-b last:border-0 hover:bg-gray-50">
                         <div>
-                            <div class="font-bold text-gray-800">${r.studentName}</div>
-                            <div class="text-xs text-gray-500">${new Date(r.timestamp).toLocaleTimeString()} • ${r.type} • ${r.recordedBy}</div>
+                            <div class="font-bold text-gray-800">${escapeHtml(r.studentName)}</div>
+                            <div class="text-xs text-gray-500">${new Date(r.timestamp).toLocaleTimeString()} • ${escapeHtml(r.type)} • ${escapeHtml(r.recordedBy)}</div>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="verifyItem('${r.id}', 'Reject')" class="p-2 text-red-500 hover:bg-red-50 rounded">✕</button>
@@ -2133,6 +2168,7 @@
                 if (el) el.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 else clearInterval(clockInterval);
             }, 1000);
+            _activeIntervals.push(clockInterval);
 
             // Call the helper function immediately
             loadClassesForRapidEntry();
@@ -2884,14 +2920,14 @@
             <tr class="border-b hover:bg-gray-50 transition-colors group">
                 <td class="p-4 whitespace-nowrap text-gray-500">${dateStr}</td>
                 <td class="p-4">
-                    <div class="font-bold text-gray-800">${r.studentName}</div>
-                    <div class="text-xs text-gray-400">${r.class}</div>
+                    <div class="font-bold text-gray-800">${escapeHtml(r.studentName)}</div>
+                    <div class="text-xs text-gray-400">${escapeHtml(r.class)}</div>
                 </td>
-                <td class="p-4"><span class="px-2 py-1 rounded-full text-xs ${levelBadge}">${r.level}</span></td>
+                <td class="p-4"><span class="px-2 py-1 rounded-full text-xs ${levelBadge}">${escapeHtml(r.level)}</span></td>
                 <td class="p-4 text-center"><span class="px-2 py-1 rounded-full text-xs bg-gray-100 font-bold">${r.offenseCount}</span></td>
                 <td class="p-4">
-                    <div class="text-gray-700 font-medium">${r.category || r.description || '-'}</div>
-                    <div class="text-xs text-gray-400 mt-1">Punishment: ${r.punishment || '-'}</div>
+                    <div class="text-gray-700 font-medium">${escapeHtml(r.category || r.description || '-')}</div>
+                    <div class="text-xs text-gray-400 mt-1">Punishment: ${escapeHtml(r.punishment || '-')}</div>
                 </td>
                 <td class="p-4"><span class="px-2 py-1 rounded border text-xs ${statusColor}">${r.status}</span></td>
                 <td class="p-4 text-right">
@@ -3044,14 +3080,14 @@
             <tr class="border-b hover:bg-gray-50 transition-colors group">
                 <td class="p-4 whitespace-nowrap text-gray-500">${dateStr}</td>
                 <td class="p-4">
-                    <div class="font-bold text-gray-800">${r.studentName}</div>
-                    <div class="text-xs text-gray-400">${r.studentId} • ${r.class}</div>
+                    <div class="font-bold text-gray-800">${escapeHtml(r.studentName)}</div>
+                    <div class="text-xs text-gray-400">${escapeHtml(r.studentId)} • ${escapeHtml(r.class)}</div>
                 </td>
-                <td class="p-4"><span class="px-2 py-1 rounded-full text-xs ${levelBadge}">${r.level}</span></td>
+                <td class="p-4"><span class="px-2 py-1 rounded-full text-xs ${levelBadge}">${escapeHtml(r.level)}</span></td>
                 <td class="p-4 text-center"><span class="px-2 py-1 rounded-full text-xs bg-gray-100 font-bold">${r.offenseCount}</span></td>
                 <td class="p-4">
-                    <div class="text-gray-700 font-medium">${r.category || r.description || '-'}</div>
-                    <div class="text-xs text-gray-400 mt-1">Punishment: ${r.punishment || '-'}</div>
+                    <div class="text-gray-700 font-medium">${escapeHtml(r.category || r.description || '-')}</div>
+                    <div class="text-xs text-gray-400 mt-1">Punishment: ${escapeHtml(r.punishment || '-')}</div>
                 </td>
                 <td class="p-4"><span class="px-2 py-1 rounded border text-xs ${statusColor}">${r.status}</span></td>
                 <td class="p-4 text-right">
@@ -4779,8 +4815,7 @@
 
                 // 6. Format Month for display
                 const [repYear, repMonth] = monthInput.split('-');
-                const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-                const monthThai = thaiMonths[parseInt(repMonth) - 1];
+                const monthThai = THAI_MONTHS[parseInt(repMonth) - 1];
                 const yearThai = parseInt(repYear) + 543;
 
                 // 7. Build Table Body
@@ -5028,8 +5063,7 @@
 
             // Format Month
             const [year, month] = report.month.split('-');
-            const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-            const monthThai = thaiMonths[parseInt(month) - 1];
+            const monthThai = THAI_MONTHS[parseInt(month) - 1];
             const yearThai = parseInt(year) + 543;
 
             card.innerHTML = `
@@ -5089,13 +5123,13 @@
                         <tr class="${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border-b border-gray-100 hover:bg-blue-50">
                             <td class="py-2 px-2">${r.date}</td>
                             <td class="py-2 px-2 font-mono text-gray-600">${r.time}</td>
-                            <td class="py-2 px-2 font-semibold text-gray-800">${r.studentName}</td>
+                            <td class="py-2 px-2 font-semibold text-gray-800">${escapeHtml(r.studentName)}</td>
                             <td class="py-2 px-2">
                                 <span class="px-2 py-0.5 rounded text-xs font-bold ${(r.type || '').includes('Real') ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
-                                    ${r.type || '-'}
+                                    ${escapeHtml(r.type || '-')}
                                 </span>
                             </td>
-                            <td class="py-2 px-2 text-gray-600 truncate max-w-[150px]">${r.reason}</td>
+                            <td class="py-2 px-2 text-gray-600 truncate max-w-[150px]">${escapeHtml(r.reason)}</td>
                             <td class="py-2 px-2 text-center">
                                 <span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold ${r.count > 2 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}">
                                 ${r.count}
@@ -5133,8 +5167,7 @@
 
             // Format Month
             const [year, month] = report.month.split('-');
-            const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-            const monthThai = thaiMonths[parseInt(month) - 1];
+            const monthThai = THAI_MONTHS[parseInt(month) - 1];
             const yearThai = parseInt(year) + 543;
 
             card.innerHTML = `
@@ -5185,7 +5218,7 @@
                                 ${r.type}
                                 </span>
                              </td>
-                            <td class="py-3 text-gray-600">${r.reason}</td>
+                            <td class="py-3 text-gray-600">${escapeHtml(r.reason)}</td>
                             <td class="py-3 text-center font-bold text-gray-800">${r.count}</td>
                             <td class="py-3 text-right">
                                 <span class="${getStatusColor(r.status)} font-medium">${r.status}</span>
